@@ -1,0 +1,41 @@
+# Project Rules & Guidelines for AI Agents (Antigravity & Cursor)
+# Project: PC Builder E-Commerce (NoSQL - MongoDB & FastAPI & Next.js)
+
+## 1. QUYỀN TRUY CẬP VÀ XỬ LÝ FILE CẤU HÌNH BẢO MẬT (.env)
+- **Quyền đọc/ghi cục bộ:** AI Agent ĐƯỢC PHÉP chủ động đọc, kiểm tra cú pháp và cập nhật các file cấu hình môi trường:
+  - `backend/.env`, `backend/.env.example`
+  - `frontend/.env.local`, `frontend/.env.example`
+  mỗi khi cần đồng bộ biến cấu hình (`MONGODB_URI`, `DB_NAME`, `JWT_SECRET`, `NEXT_PUBLIC_API_URL`) phục vụ việc chạy seed data, khởi động server hoặc kiểm tra kết nối database.
+- **Nguyên tắc bảo mật tối thượng:**
+  - TUYỆT ĐỐI KHÔNG in (echo/print) các giá trị mật khẩu, secret key hoặc connection string thật lên log/output công khai hoặc tin nhắn trả lời cho người dùng nếu không được yêu cầu rõ ràng.
+  - TUYỆT ĐỐI KHÔNG xóa bỏ hoặc vô hiệu hóa cấu hình bỏ qua file `.env` trong `.gitignore`.
+  - Khi cập nhật biến môi trường mới vào file `.env`, PHẢI luôn cập nhật tương ứng vào file `.env.example` kèm giá trị mẫu an toàn (mock/dummy).
+
+## 2. QUY CHUẨN THIẾT KẾ & LẬP TRÌNH NOSQL MONGODB
+- **Không áp dụng tư duy Quan hệ (Relational/SQL) vào MongoDB:**
+  - Không tạo các bảng rời rạc nối nhau bằng khóa ngoại dày đặc hoặc viết truy vấn lạm dụng `$lookup` mô phỏng `SQL JOIN`.
+  - **Snapshot Pattern (Chi tiết đơn hàng):** Trong collection `orders`, nhúng mảng `items` gồm `{ product_id, name, quantity, unit_price, sku }` để lưu giữ chính xác giá tại thời điểm mua, độc lập với việc sản phẩm gốc có thay đổi giá hay bị xóa sau này.
+  - **Document Embedding:** Gom dữ liệu địa giới hành chính (Tỉnh -> Quận/Huyện -> Phường/Xã) vào 1 collection duy nhất `locations`. Giỏ hàng của người dùng được nhúng trực tiếp trong `users.cart`.
+- **Dynamic Specs & Wildcard Indexing:**
+  - Collection `products` sử dụng trường `specs` dạng đa hình (polymorphic object) tùy biến theo từng loại linh kiện (CPU có socket, cores, threads; Mainboard có socket, chipset, ram_type; GPU có vram, tdp...).
+  - Đánh **Wildcard Index** trên `"specs.$**"` để phục vụ tìm kiếm và lọc linh kiện theo specs linh hoạt mà không cần tạo index riêng lẻ cho từng thông số.
+  - Đánh **Text Index** trên `name` để phục vụ full-text search.
+- **Aggregation Pipeline cho Thống kê:**
+  - Tận dụng sức mạnh của MongoDB Aggregation Pipeline (`$match`, `$unwind`, `$group`, `$sort`, `$facet`, `$project`) trong các API thống kê báo cáo (doanh thu theo trạng thái đơn hàng, top sản phẩm bán chạy, cảnh báo hàng sắp hết `min_stock_alert`).
+- **Data Integrity & Schema Validation:**
+  - Mọi collection chính đều phải có `$jsonSchema` validator bảo vệ dữ liệu ở tầng cơ sở dữ liệu.
+  - Trong logic đặt hàng, mô phỏng hoặc sử dụng MongoDB Transaction / Atomic Updates (`$inc`, `$set` có điều kiện) để đảm bảo không bị trừ âm số lượng tồn kho (`stock`).
+
+## 3. QUY TẮC PHÁT TRIỂN & CẤU TRÚC CODE
+- **Backend (Python FastAPI):**
+  - Sử dụng driver bất đồng bộ `motor.motor_asyncio`.
+  - Định nghĩa DTO & Validation bằng `pydantic`.
+  - Phân tách tầng rõ ràng: `app/core` (config), `app/database` (connection & collections), `app/models` (schema), `app/routers` (APIs).
+- **Frontend (Next.js 14+ App Router & TypeScript):**
+  - Viết code TypeScript chặt chẽ, tạo interface cho toàn bộ thực thể (`Product`, `PCBuild`, `CartItem`, `Order`).
+  - Giao diện hiện đại sử dụng Tailwind CSS và Lucide Icons.
+  - Trang **PC Builder** phải tích hợp engine kiểm tra tính tương thích (Compatibility Check) giữa các linh kiện (Socket CPU vs Socket Mainboard, Chuẩn RAM DDR4/DDR5, Công suất nguồn PSU vs Tổng TDP hệ thống).
+
+## 4. QUY TRÌNH PHỐI HỢP NHÓM 2 NGƯỜI
+- Luôn kiểm tra tính tương thích giữa API Backend và DTO Frontend trước khi hoàn thiện tính năng.
+- Khi một tính năng mới yêu cầu thêm thông số kỹ thuật (specs) cho linh kiện, hãy cập nhật đồng bộ trong `seed_data.json`, `models/product.py` và giao diện chọn linh kiện của Next.js.

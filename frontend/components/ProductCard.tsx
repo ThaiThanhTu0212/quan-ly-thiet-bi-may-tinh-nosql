@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import Image from 'next/image';
 import { Product } from '@/lib/api';
+import { useProductModal } from '@/components/ProductModalProvider';
 import { ShoppingCart, Wrench, CheckCircle, AlertTriangle } from 'lucide-react';
 
 interface ProductCardProps {
@@ -12,6 +12,7 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, onAddToCart, onSelectForBuild }: ProductCardProps) {
+  const showProduct = useProductModal();
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price);
   };
@@ -67,7 +68,9 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
         <div>
           <span className="text-[11px] font-mono text-slate-500">{product.sku}</span>
           <h3 className="font-semibold text-white text-sm line-clamp-2 mt-0.5 group-hover:text-sky-400 transition-colors">
-            {product.name}
+            <button type="button" onClick={() => showProduct(product.sku)} className="text-left hover:underline">
+              {product.name}
+            </button>
           </h3>
 
           {/* Dynamic Specs highlights */}

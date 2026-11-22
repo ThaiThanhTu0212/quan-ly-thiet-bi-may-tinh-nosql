@@ -29,3 +29,4 @@ class ProductListResponse(BaseModel):
     items: List[ProductResponse]
     categories: Optional[List[CategoryEmbedded]] = []
     brands: Optional[List[BrandEmbedded]] = []
+    spec_options: Dict[str, List[str | int]] = Field(default_factory=dict)

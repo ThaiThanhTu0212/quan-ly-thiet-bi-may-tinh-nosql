@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database.connection import get_database
 from app.models.order import OrderCreateRequest, OrderResponse, OrderDates
+from app.routers.auth import check_origin, require_admin
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -94,7 +95,7 @@ async def get_order_by_code(order_code: str):
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng {order_code}")
     return order
 
-@router.patch("/{order_code}/status")
+@router.patch("/{order_code}/status", dependencies=[Depends(check_origin), Depends(require_admin)])
 async def update_order_status(order_code: str, status: str = Query(..., regex="^(Đang giao|Đã giao|Đã hủy)$")):
     """Cập nhật trạng thái đơn hàng (Dành cho Admin)."""
     db = get_database()

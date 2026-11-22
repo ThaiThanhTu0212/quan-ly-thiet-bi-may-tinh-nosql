@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = '/backend-api';
 
 export interface Category {
   id: string;
@@ -30,6 +30,40 @@ export interface ProductListResponse {
   items: Product[];
   categories: Category[];
   brands: Brand[];
+  spec_options: Record<string, (string | number)[]>;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string;
+  role: 'admin' | 'customer';
+}
+
+export async function authRequest<T>(path: string, body?: Record<string, string>): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/auth/${path}`, {
+    cache: 'no-store',
+    ...(body && {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  });
+  if (res.status === 204) return undefined as T;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (typeof data.detail === 'string') throw new Error(data.detail);
+    const messages: Record<string, string> = {
+      email: 'Email không hợp lệ.',
+      full_name: 'Vui lòng kiểm tra họ và tên.',
+      username: 'Vui lòng kiểm tra tên đăng nhập.',
+      password: 'Vui lòng kiểm tra độ dài mật khẩu.',
+    };
+    const field = Array.isArray(data.detail) ? data.detail[0]?.loc?.[1] : undefined;
+    throw new Error(messages[field] || 'Vui lòng kiểm tra thông tin đã nhập.');
+  }
+  return data;
 }
 
 export interface CompatibilityMessage {
@@ -80,7 +114,7 @@ export interface Order {
 }
 
 // API functions
-export async function getProducts(params?: Record<string, any>): Promise<ProductListResponse> {
+export async function getProducts(params?: Record<string, string | number | undefined>, signal?: AbortSignal): Promise<ProductListResponse> {
   const query = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([key, val]) => {
@@ -89,14 +123,26 @@ export async function getProducts(params?: Record<string, any>): Promise<Product
       }
     });
   }
-  const res = await fetch(`${API_BASE_URL}/products?${query.toString()}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE_URL}/products?${query.toString()}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error('Không thể tải danh sách sản phẩm');
   return res.json();
 }
 
-export async function getProductBySku(sku: string): Promise<Product> {
-  const res = await fetch(`${API_BASE_URL}/products/${sku}`, { cache: 'no-store' });
+export async function getProductBySku(sku: string, signal?: AbortSignal): Promise<Product> {
+  const res = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(sku)}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error(`Không tìm thấy linh kiện: ${sku}`);
+  return res.json();
+}
+
+export async function getBestSellers(signal?: AbortSignal): Promise<Product[]> {
+  const res = await fetch(`${API_BASE_URL}/products/best-sellers`, { cache: 'no-store', signal });
+  if (!res.ok) throw new Error('Không thể tải sản phẩm bán chạy');
+  return res.json();
+}
+
+export async function getCategories(signal?: AbortSignal): Promise<Category[]> {
+  const res = await fetch(`${API_BASE_URL}/products/categories/list`, { cache: 'no-store', signal });
+  if (!res.ok) throw new Error('Không thể tải danh mục');
   return res.json();
 }
 

@@ -11,7 +11,7 @@ class MongoDBManager:
 mongodb_manager = MongoDBManager()
 
 async def connect_to_mongo():
-    logger.info(f"Connecting to MongoDB at: {settings.MONGODB_URI}")
+    logger.info("Connecting to MongoDB")
     try:
         mongodb_manager.client = AsyncIOMotorClient(
             settings.MONGODB_URI,
@@ -21,13 +21,15 @@ async def connect_to_mongo():
         # Thử ping server
         await mongodb_manager.client.admin.command('ping')
         logger.info(f"Successfully connected to MongoDB database: '{settings.DB_NAME}'")
-    except Exception as e:
-        logger.warning(f"Could not connect to MongoDB on startup ({e}). API will retry per request.")
+    except Exception as exc:
+        logger.warning("MongoDB startup connection failed (%s).", type(exc).__name__)
 
 async def close_mongo_connection():
     if mongodb_manager.client:
         logger.info("Closing MongoDB connection...")
         mongodb_manager.client.close()
+        mongodb_manager.client = None
+        mongodb_manager.db = None
         logger.info("MongoDB connection closed.")
 
 def get_database() -> AsyncIOMotorDatabase:

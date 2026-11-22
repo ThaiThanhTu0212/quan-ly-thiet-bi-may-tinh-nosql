@@ -484,6 +484,38 @@
         "refresh_rate_hz": 180,
         "response_time_ms": 1
       }
+    },
+    {
+      "sku": "SP26",
+      "name": "AMD Ryzen 7 7800X3D",
+      "category": {
+        "id": "LSP01",
+        "name": "CPU"
+      },
+      "brand": {
+        "id": "CT02",
+        "name": "AMD"
+      },
+      "price": 9990000,
+      "stock": 12,
+      "min_stock_alert": 3,
+      "images": [
+        "/images/CPU_7800x3d_1.jpg",
+        "/images/CPU_7800x3d_2.jpg",
+        "/images/CPU_7800x3d_3.jpg",
+        "/images/CPU_7800x3d_4.jpg"
+      ],
+      "description": "CPU AMD Ryzen 7000 với bộ nhớ đệm 3D V-Cache, dùng socket AM5.",
+      "specs": {
+        "socket": "AM5",
+        "cores": 8,
+        "threads": 16,
+        "base_clock_ghz": 4.2,
+        "boost_clock_ghz": 5.0,
+        "tdp_watt": 120,
+        "cache_mb": 104,
+        "integrated_gpu": true
+      }
     }
   ],
   "locations": [

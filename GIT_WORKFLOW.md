@@ -115,4 +115,4 @@ Nếu một trong hai người không có kết nối internet ổn định:
    cd backend
    python database/seed.py
    ```
-   Lệnh này sẽ tự động drop dữ liệu cũ, tái lập indexes và nạp lại toàn bộ dữ liệu chuẩn đã đồng bộ.
+   Lệnh này áp dụng validators và indexes, sau đó chèn các bản ghi mẫu còn thiếu theo mã định danh. Chạy lại seed giữ nguyên tồn kho, đơn hàng và tài khoản đã có.

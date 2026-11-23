@@ -103,7 +103,7 @@ export interface Order {
   shipping_address: ShippingAddress;
   items: OrderItem[];
   total_amount: number;
-  status: 'Đang giao' | 'Đã giao' | 'Đã hủy';
+  status: 'Chờ xác nhận' | 'Đang giao' | 'Đã giao' | 'Đã hủy';
   payment_status: 'Đã thanh toán' | 'Chưa thanh toán';
   payment_method?: string;
   dates: {
@@ -146,55 +146,75 @@ export async function getCategories(signal?: AbortSignal): Promise<Category[]> {
   return res.json();
 }
 
-export async function checkPCCompatibility(skus: {
-  cpu_sku?: string;
-  mainboard_sku?: string;
-  ram_sku?: string;
-  gpu_sku?: string;
-  psu_sku?: string;
-  storage_sku?: string;
-  case_sku?: string;
-  cooler_sku?: string;
-}): Promise<CompatibilityResponse> {
-  const res = await fetch(`${API_BASE_URL}/pc-builder/check-compatibility`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(skus),
-  });
-  if (!res.ok) throw new Error('Lỗi khi kiểm tra tính tương thích');
-  return res.json();
+export interface Selection {
+  cpu_sku?: string; mainboard_sku?: string; ram_sku?: string; gpu_sku?: string;
+  psu_sku?: string; storage_sku?: string; case_sku?: string; cooler_sku?: string;
 }
 
-export async function savePCBuild(buildData: any) {
-  const res = await fetch(`${API_BASE_URL}/pc-builder/save`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildData),
-  });
-  if (!res.ok) throw new Error('Không thể lưu cấu hình PC');
-  return res.json();
+export interface CartEntry { sku: string; quantity: number; product: Product | null }
+export interface Cart { items: CartEntry[]; total_amount: number }
+export interface SavedBuild {
+  build_code: string; title: string; notes: string; components: Record<string, Product>;
+  total_price: number; estimated_wattage: number; is_compatible: boolean;
+}
+export interface Ward { ward_id: string; ward_name: string }
+export interface District { district_id: string; district_name: string; wards: Ward[] }
+export interface Province { province_id: string; province_name: string; districts: District[] }
+export interface CheckoutRequest {
+  request_id: string; shipping_address: ShippingAddress;
+  items: { sku: string; quantity: number }[]; payment_method: 'COD' | 'Chuyển khoản';
+  expected_total: number;
 }
 
-export async function createOrder(orderData: any): Promise<Order> {
-  const res = await fetch(`${API_BASE_URL}/orders`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(orderData),
-  });
-  if (!res.ok) {
-    const errorData = await res.json();
-    throw new Error(errorData.detail || 'Không thể tạo đơn hàng');
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
   }
-  return res.json();
 }
 
-export async function getOrders(params?: { customer_email?: string; status?: string }): Promise<Order[]> {
+export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(API_BASE_URL + path, { cache: 'no-store', ...options,
+    headers: { 'Content-Type': 'application/json', ...options.headers } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof data.detail === 'string' ? data.detail
+      : response.status === 401 ? 'Vui lòng đăng nhập để tiếp tục.'
+      : response.status === 422 ? 'Vui lòng kiểm tra thông tin đã nhập.' : 'Không thể gửi yêu cầu. Vui lòng thử lại.';
+    throw new ApiError(message, response.status);
+  }
+  return data;
+}
+
+export function checkPCCompatibility(selection: Selection, signal?: AbortSignal) {
+  return apiRequest<CompatibilityResponse>('/builder/check-compatibility',
+    { method: 'POST', body: JSON.stringify(selection), signal });
+}
+export function savePCBuild(build: { title: string; components: Record<string, string>; notes?: string }) {
+  return apiRequest<SavedBuild>('/builder/share', { method: 'POST', body: JSON.stringify(build) });
+}
+export function getSharedBuild(code: string, signal?: AbortSignal) {
+  return apiRequest<SavedBuild>('/builder/share/' + encodeURIComponent(code), { signal });
+}
+export function getCart(signal?: AbortSignal) { return apiRequest<Cart>('/cart', { signal }); }
+export function addCartItems(items: { sku: string; quantity: number }[]) {
+  return apiRequest<Cart>('/cart/items', { method: 'POST', body: JSON.stringify({ items }) });
+}
+export function setCartQuantity(sku: string, quantity: number) {
+  return apiRequest<Cart>('/cart/items/' + encodeURIComponent(sku),
+    { method: 'PUT', body: JSON.stringify({ sku, quantity }) });
+}
+export function removeCartItem(sku: string) {
+  return apiRequest<Cart>('/cart/items/' + encodeURIComponent(sku), { method: 'DELETE' });
+}
+export function clearCart() { return apiRequest<Cart>('/cart', { method: 'DELETE' }); }
+export function createOrder(order: CheckoutRequest) {
+  return apiRequest<Order>('/orders', { method: 'POST', body: JSON.stringify(order) });
+}
+export function getOrders(params?: { customer_email?: string; status?: string; skip?: number; limit?: number }, signal?: AbortSignal) {
   const query = new URLSearchParams();
-  if (params?.customer_email) query.append('customer_email', params.customer_email);
-  if (params?.status) query.append('status', params.status);
-  const res = await fetch(`${API_BASE_URL}/orders?${query.toString()}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Không thể tải danh sách đơn hàng');
-  return res.json();
+  Object.entries(params ?? {}).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
+  return apiRequest<Order[]>('/orders?' + query, { signal });
 }
 
 export async function getAnalyticsOverview() {
@@ -221,8 +241,6 @@ export async function getLowStockAlert() {
   return res.json();
 }
 
-export async function getLocations() {
-  const res = await fetch(`${API_BASE_URL}/locations`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Không thể tải danh mục địa giới');
-  return res.json();
+export function getLocations(signal?: AbortSignal) {
+  return apiRequest<Province[]>('/locations', { signal });
 }

@@ -6,15 +6,17 @@ import { useState } from 'react';
 import { Cpu, Menu, X } from 'lucide-react';
 import { useSession } from '@/components/SessionProvider';
 import CategorySidebar from '@/components/CategorySidebar';
+import { useCart } from '@/components/CartProvider';
 
 const links = [
   { href: '/products', label: 'Linh kiện PC' },
-  { href: '/pc-builder', label: 'Build PC' },
+  { href: '/build-pc', label: 'Build PC' },
   { href: '/cart', label: 'Giỏ hàng' },
-  { href: '/orders', label: 'Đơn hàng' },
+  { href: '/account/orders', label: 'Đơn hàng' },
 ];
 
 export default function Navbar() {
+  const { cart } = useCart();
   const pathname = usePathname();
   const { user, pending, logout } = useSession();
   const [open, setOpen] = useState(false);
@@ -50,6 +52,7 @@ export default function Navbar() {
               aria-current={pathname === href ? 'page' : undefined}
               className={`rounded-lg px-3 py-2 hover:bg-slate-800 ${pathname === href ? 'bg-slate-800 text-sky-300' : 'text-slate-200'}`}>
               {label}
+              {href === '/cart' && cart.items.length > 0 && <span className="ml-1 text-sky-300">({cart.items.reduce((sum, item) => sum + item.quantity, 0)})</span>}
             </Link>
           ))}
           {!pending && (user ? (

@@ -128,7 +128,7 @@ ORDER_SCHEMA: Dict[str, Any] = {
                 "description": "Tổng tiền đơn hàng (VND)"
             },
             "status": {
-                "enum": ["Đang giao", "Đã giao", "Đã hủy"],
+                "enum": ["Chờ xác nhận", "Đang giao", "Đã giao", "Đã hủy"],
                 "description": "Trạng thái đơn hàng theo đúng ràng buộc SQL cũ"
             },
             "payment_status": {
@@ -353,6 +353,11 @@ def create_all_indexes(db):
     db.orders.create_index([("customer_email", 1)], name="idx_customer_email")
     print(" [V] Created Indexes for 'orders' (status, created_at, customer_email).")
 
+    db.orders.create_index(
+        [("user_id", 1), ("request_id", 1)], unique=True, name="idx_user_checkout_request",
+        partialFilterExpression={"user_id": {"$type": "string"}, "request_id": {"$type": "string"}},
+    )
+    db.orders.create_index([("user_id", 1), ("dates.created_at", -1)], name="idx_user_orders")
     # 3. Indexes cho 'users'
     db.users.create_index([("username", 1)], unique=True, name="idx_unique_username")
     db.users.create_index([("email", 1)], unique=True, name="idx_unique_email")

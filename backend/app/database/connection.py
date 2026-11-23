@@ -20,6 +20,15 @@ async def connect_to_mongo():
         mongodb_manager.db = mongodb_manager.client[settings.DB_NAME]
         # Thử ping server
         await mongodb_manager.client.admin.command('ping')
+        # Checkout retries must remain unique even when the seed script was not run.
+        await mongodb_manager.db.orders.create_index(
+            [("user_id", 1), ("request_id", 1)], unique=True,
+            name="idx_user_checkout_request",
+            partialFilterExpression={"user_id": {"$type": "string"}, "request_id": {"$type": "string"}},
+        )
+        await mongodb_manager.db.orders.create_index(
+            [("order_code", 1)], unique=True, name="idx_unique_order_code",
+        )
         logger.info(f"Successfully connected to MongoDB database: '{settings.DB_NAME}'")
     except Exception as exc:
         logger.warning("MongoDB startup connection failed (%s).", type(exc).__name__)

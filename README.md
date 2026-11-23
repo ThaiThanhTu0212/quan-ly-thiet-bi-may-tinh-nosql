@@ -161,3 +161,97 @@ npm run dev
 - Tại `/products`, thử tìm AMD, chọn CPU và socket AM5, lọc GPU với VRAM từ 10 GB, lọc RAM với dung lượng từ 32 GB, đặt khoảng giá, đổi cách sắp xếp và chuyển trang. Bấm tên linh kiện để mở chi tiết.
 - Kiểm tra `GET /api/v1/products?q=AMD&socket=AM5&sort=price_asc&limit=9&skip=0` hoặc dùng lọc thông số tùy chỉnh như `GET /api/v1/products?spec.cores=8`.
 - Trang chủ lấy danh mục từ MongoDB. Danh sách bán chạy dựa trên tổng số linh kiện của đơn đã giao.
+
+## Bàn giao tuần 2
+
+### Chức năng khách hàng
+
+- Mở /build-pc để chọn CPU, mainboard, RAM, GPU, ổ đĩa, PSU, case và tản nhiệt. Hệ thống kiểm tra socket, chuẩn RAM, công suất nguồn, tản nhiệt và kích thước GPU. Tổng giá lấy từ danh mục hiện tại.
+- Bấm Lưu và chia sẻ để lưu snapshot cấu hình vào pc_builds. Liên kết /build-pc?share=... mở được khi chưa đăng nhập. Khi mở lại, hệ thống kiểm tra tương thích với dữ liệu danh mục hiện tại.
+- Đăng nhập và thêm linh kiện từ trang chủ, danh sách sản phẩm hoặc thêm cả cấu hình vào giỏ hàng. Giỏ hàng lưu trong users.cart và được đồng bộ sau khi tải lại trang.
+- Mở /cart để tăng giảm số lượng, xóa linh kiện hoặc xóa giỏ hàng. Linh kiện thiếu hàng được cảnh báo.
+- Mở /checkout để chọn địa chỉ từ locations theo ba cấp và xác nhận đơn hàng. Giá, tên và tổng tiền được tính lại ở backend. Đơn mới ở trạng thái Chờ xác nhận và Chưa thanh toán.
+- Trang /account/orders hiển thị lịch sử và snapshot của tài khoản đang đăng nhập. Các đường dẫn cũ /pc-builder và /orders vẫn truy cập được.
+
+### Chuẩn bị MongoDB cho đặt hàng
+
+Luồng đặt hàng dùng session.with_transaction để trừ kho, tạo snapshot đơn và cập nhật giỏ hàng cùng nhau. Kết nối MongoDB phải hỗ trợ transaction, sử dụng MongoDB Atlas hoặc replica set local.
+
+Sau khi cập nhật code, chạy trong thư mục backend để áp dụng validator trạng thái Chờ xác nhận và index chống tạo trùng đơn.
+
+```powershell
+.\.venv\Scripts\python.exe database\schema_validation.py
+```
+
+Nếu đang dùng Atlas, giữ kết nối Atlas trong backend/.env rồi chạy seed khi cần bổ sung dữ liệu mẫu.
+
+Nếu MongoDB local hiện tại là standalone, có thể tạo một instance replica set riêng cho đồ án trên cổng 27018. Instance mới dùng dữ liệu riêng trong backend/.mongo-rs. Cần nạp seed và đăng ký tài khoản trên instance này. Các lệnh sau dùng phiên bản MongoDB 8.3 đã cài trên máy.
+
+Trong PowerShell thứ nhất, chạy tại thư mục dự án.
+
+```powershell
+cd C:\Dev_CSDLPQH
+New-Item -ItemType Directory -Force backend\.mongo-rs
+& "C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe" --dbpath "C:\Dev_CSDLPQH\backend\.mongo-rs" --replSet rs0 --bind_ip 127.0.0.1 --port 27018
+```
+
+Giữ tiến trình đó chạy. Trong PowerShell thứ hai, khởi tạo replica set một lần.
+
+```powershell
+cd C:\Dev_CSDLPQH\backend
+.\.venv\Scripts\python.exe -c "from pymongo import MongoClient; c=MongoClient('mongodb://127.0.0.1:27018/?directConnection=true'); c.admin.command('replSetInitiate', {'_id':'rs0','members':[{'_id':0,'host':'127.0.0.1:27018'}]}); print('Replica set initialized')"
+```
+
+Sửa dòng MONGODB_URI trong backend/.env thành giá trị sau rồi lưu file.
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27018/?replicaSet=rs0
+```
+
+Chờ replica set có primary rồi nạp dữ liệu và chạy backend.
+
+```powershell
+.\.venv\Scripts\python.exe database\seed.py
+.\.venv\Scripts\python.exe main.py
+```
+
+Nếu đã khởi tạo rs0 trước đó, chỉ cần khởi động mongod bằng lệnh ở trên và chạy backend.
+
+### API tuần 2
+
+| Method | Endpoint | Nội dung |
+| --- | --- | --- |
+| POST | /api/v1/builder/check-compatibility | Kiểm tra các mã linh kiện theo slot |
+| POST | /api/v1/builder/share | Lưu cấu hình của người dùng đã đăng nhập |
+| GET | /api/v1/builder/share/{build_code} | Xem cấu hình được chia sẻ |
+| GET | /api/v1/builder/builds | Cấu hình đã lưu của tài khoản |
+| GET | /api/v1/cart | Giỏ hàng và giá hiện tại |
+| POST | /api/v1/cart/items | Thêm một hoặc nhiều linh kiện |
+| PUT | /api/v1/cart/items/{sku} | Đặt số lượng linh kiện |
+| DELETE | /api/v1/cart/items/{sku} | Xóa linh kiện |
+| DELETE | /api/v1/cart | Xóa giỏ hàng |
+| POST | /api/v1/orders | Đặt hàng bằng transaction |
+| GET | /api/v1/orders | Lịch sử đơn hàng theo quyền |
+| GET | /api/v1/orders/{order_code} | Chi tiết snapshot theo quyền |
+
+Đặt hàng nhận request_id duy nhất cho mỗi lần mua. Gửi lại cùng request_id trả về đơn đã tạo. Frontend giữ request_id khi gửi lại yêu cầu sau lỗi mạng. API chỉ nhận SKU và số lượng từ giỏ hàng, tự lấy tên, giá và tài khoản ở server. Các phương thức COD và Chuyển khoản đều chờ xác nhận thanh toán của cửa hàng.
+
+### Kiểm thử tuần 2
+
+Chạy kiểm thử logic tại thư mục backend.
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Để chạy thêm kiểm thử với MongoDB replica set local trên cổng 27018, đặt biến môi trường trong PowerShell.
+
+```powershell
+$env:TEST_MONGODB_URI="mongodb://127.0.0.1:27018/?replicaSet=rs0"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+Remove-Item Env:\TEST_MONGODB_URI
+```
+
+Kiểm thử tích hợp tạo một database week2_test_ có mã ngẫu nhiên cho mỗi test rồi xóa đúng database đó khi xong. Các ca kiểm thử gồm đặt hàng, gửi lại yêu cầu, giá thay đổi, rollback khi ghi đơn thất bại, hai khách cùng mua sản phẩm cuối và quyền truy cập đơn hàng.
+
+Kiểm tra giao diện bằng cách đăng ký tài khoản, chọn CPU SP01 với mainboard SP05 để thấy lỗi socket, chọn mainboard SP07 với RAM SP08 để thấy lỗi chuẩn RAM, lưu liên kết chia sẻ, thêm linh kiện hợp lệ vào giỏ, thay số lượng, đặt hàng và mở lịch sử. Đăng nhập tài khoản khác để kiểm tra lịch sử được giới hạn theo tài khoản.

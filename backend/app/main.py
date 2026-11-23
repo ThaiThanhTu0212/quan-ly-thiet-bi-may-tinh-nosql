@@ -10,7 +10,7 @@ from pymongo.errors import ConnectionFailure
 
 from app.core.config import settings
 from app.database.connection import connect_to_mongo, close_mongo_connection
-from app.routers import auth, products, pc_builder, orders, analytics, locations
+from app.routers import auth, cart, products, pc_builder, orders, analytics, locations
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,10 +38,13 @@ app.add_middleware(
 )
 
 # Đăng ký các Router API
-for router in (auth.router, products.router, pc_builder.router, orders.router, analytics.router, locations.router):
+for router in (auth.router, cart.router, products.router, orders.router, analytics.router, locations.router):
     app.include_router(router, prefix="/api/v1")
     for alias in {"/api", settings.API_V1_STR} - {"/api/v1"}:
         app.include_router(router, prefix=alias, include_in_schema=False)
+app.include_router(pc_builder.router, prefix="/api/v1/builder")
+for prefix in {"/api", "/api/v1", settings.API_V1_STR}:
+    app.include_router(pc_builder.router, prefix=prefix + "/pc-builder", include_in_schema=False)
 
 
 @app.exception_handler(ConnectionFailure)

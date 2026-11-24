@@ -182,6 +182,15 @@ USER_SCHEMA: Dict[str, Any] = {
                 "enum": ["customer", "admin"],
                 "description": "Vai trò tài khoản"
             },
+            "default_address_id": {"bsonType": ["string", "null"]},
+            "addresses": {
+                "bsonType": "array", "maxItems": 10,
+                "items": {
+                    "bsonType": "object",
+                    "required": ["id", "label", "full_name", "phone", "street", "ward", "district", "province"],
+                    "properties": {key: {"bsonType": "string"} for key in ["id", "label", "full_name", "phone", "street", "ward", "district", "province"]},
+                },
+            },
             "default_address": {
                 "bsonType": "object",
                 "properties": {

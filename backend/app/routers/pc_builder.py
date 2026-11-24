@@ -1,4 +1,5 @@
 import uuid
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database.connection import get_database
@@ -13,6 +14,19 @@ SLOTS = {"cpu": "LSP01", "mainboard": "LSP02", "ram": "LSP03", "storage": "LSP04
 
 def normalize(value):
     return str(value).replace(" ", "").upper()
+
+
+def number(value, default=0):
+    try:
+        value = float(value)
+        return value if math.isfinite(value) and value >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def board_size(value):
+    value = normalize(value).replace("-", "").replace("_", "")
+    return {"MICROATX": "MATX", "MINIITX": "MITX", "ITX": "MITX"}.get(value, value)
 
 
 def evaluate_components(components):
@@ -35,13 +49,18 @@ def evaluate_components(components):
         if normalize(cpu.get("socket")) not in {normalize(socket) for socket in cooler["supported_sockets"]}:
             message("error", "Tản nhiệt", "Tản nhiệt không hỗ trợ socket CPU đã chọn.")
     gpu, case = spec("gpu"), spec("case")
-    if gpu.get("length_mm", 0) > case.get("max_gpu_length_mm", float("inf")):
+    if number(gpu.get("length_mm")) > number(case.get("max_gpu_length_mm"), float("inf")):
         message("error", "GPU & Case", "Card đồ họa dài hơn kích thước case hỗ trợ.")
-    tdp = sum(int(item.get("specs", {}).get("tdp_watt", 0)) for slot, item in components.items() if item and slot != "psu")
+    if main.get("form_factor") and case.get("supported_motherboards"):
+        if board_size(main["form_factor"]) not in {board_size(value) for value in case["supported_motherboards"]}:
+            message("error", "Mainboard & Case", "Case không hỗ trợ kích thước mainboard đã chọn.")
+    if number(cooler.get("height_mm")) > number(case.get("max_cpu_cooler_height_mm"), float("inf")):
+        message("error", "Tản nhiệt & Case", "Tản nhiệt cao hơn giới hạn của case.")
+    tdp = sum(int(number(item.get("specs", {}).get("tdp_watt"))) for slot, item in components.items() if item and slot != "psu")
     estimated = tdp + (80 if any(components.values()) else 0)
-    recommended = max(estimated + 150, gpu.get("recommended_psu_watt", 0)) if estimated else 0
+    recommended = int(max(estimated + 150, number(gpu.get("recommended_psu_watt")))) if estimated else 0
     if components.get("psu"):
-        watts = spec("psu").get("wattage", 0)
+        watts = number(spec("psu").get("wattage"))
         kind = "error" if watts < estimated else "warning" if watts < recommended else "success"
         message(kind, "Nguồn PSU", f"Nguồn {watts} W, tiêu thụ ước tính {estimated} W, khuyến nghị {recommended} W.")
     elif estimated:
@@ -70,6 +89,54 @@ async def check_compatibility(payload: CompatibilityCheckRequest):
             raise HTTPException(422, f"Linh kiện {sku} không thuộc vị trí {slot}.")
         components[slot] = product
     return evaluate_components(components)
+
+
+def recommendation_for(slot, product, selected):
+    components = {**selected, slot: product}
+    relevant = {
+        "cpu": {"CPU & Mainboard", "Tản nhiệt", "Nguồn PSU"},
+        "mainboard": {"CPU & Mainboard", "Mainboard & RAM", "Mainboard & Case", "Nguồn PSU"},
+        "ram": {"Mainboard & RAM", "Nguồn PSU"},
+        "gpu": {"GPU & Case", "Nguồn PSU"},
+        "storage": {"Nguồn PSU"}, "psu": {"Nguồn PSU"},
+        "case": {"GPU & Case", "Mainboard & Case", "Tản nhiệt & Case", "Nguồn PSU"},
+        "cooler": {"Tản nhiệt", "Tản nhiệt & Case", "Nguồn PSU"},
+    }[slot]
+    unknown = set()
+    pairs = [
+        ("cpu", "mainboard", "socket", "socket", "CPU & Mainboard"),
+        ("ram", "mainboard", "ram_type", "ram_type", "Mainboard & RAM"),
+        ("cpu", "cooler", "socket", "supported_sockets", "Tản nhiệt"),
+        ("gpu", "case", "length_mm", "max_gpu_length_mm", "GPU & Case"),
+        ("mainboard", "case", "form_factor", "supported_motherboards", "Mainboard & Case"),
+    ]
+    for left, right, a, b, label in pairs:
+        if slot in (left, right) and components.get(left) and components.get(right):
+            if not components[left].get("specs", {}).get(a) or not components[right].get("specs", {}).get(b):
+                unknown.add(label)
+    if components.get("psu") and not number(components["psu"].get("specs", {}).get("wattage")):
+        unknown.add("Nguồn PSU")
+    result = evaluate_components(components)
+    messages = [m for m in result.messages if m.component in relevant and m.component not in unknown
+                and (m.component != "Nguồn PSU" or components.get("psu"))]
+    errors = [m.message for m in messages if m.type == "error"]
+    warnings = [m.message for m in messages if m.type == "warning"]
+    reasons = errors + warnings + ["Chưa đủ thông tin để kiểm tra " + group for group in sorted(unknown)]
+    reasons += [m.message for m in messages if m.type == "success"]
+    status = "incompatible" if errors else "unknown" if unknown else "warning" if warnings else "compatible"
+    if product.get("stock", 0) <= 0:
+        status = "out_of_stock"
+        reasons.insert(0, "Linh kiện đang hết hàng.")
+    return {"sku": product["sku"], "status": status,
+            "reasons": reasons or ["Chưa phát hiện xung đột với linh kiện đã chọn; hãy kiểm tra cấu hình đầy đủ trước khi mua."]}
+
+
+@router.post("/recommendations")
+async def get_recommendations(payload: CompatibilityCheckRequest):
+    selected = (await check_compatibility(payload)).components
+    products = await get_database().products.find({"category.id": {"$in": list(SLOTS.values())}}, {"_id": 0}).to_list(None)
+    return {"slots": {slot: [recommendation_for(slot, product, selected) for product in products
+                             if product["category"]["id"] == category] for slot, category in SLOTS.items()}}
 
 
 @router.post("/share", response_model=PCBuildResponse, status_code=201, dependencies=[Depends(check_origin)])

@@ -22,6 +22,7 @@ class ShippingAddress(BaseModel):
 
 
 class OrderItemSnapshot(CartEntry):
+    category: dict[str, str] | None = None
     product_id: str | None = None
     name: str
     unit_price: float = Field(ge=0)
@@ -36,6 +37,7 @@ class OrderCreateRequest(BaseModel):
 
 
 class OrderDates(BaseModel):
+    cancelled_at: str | None = None
     created_at: str
     paid_at: str | None = None
     estimated_delivery: str | None = None

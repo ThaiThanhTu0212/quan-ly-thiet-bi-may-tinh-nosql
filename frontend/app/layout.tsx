@@ -7,6 +7,7 @@ import Footer from '@/components/Footer';
 import { SessionProvider } from '@/components/SessionProvider';
 import { ProductModalProvider } from '@/components/ProductModalProvider';
 import { CartProvider } from '@/components/CartProvider';
+import { ComparisonProvider } from '@/components/ComparisonProvider';
 
 export const metadata: Metadata = {
   title: 'PC Builder Store - NoSQL MongoDB Project',
@@ -23,11 +24,13 @@ export default function RootLayout({
       <body className="bg-slate-950 text-slate-100 flex flex-col min-h-screen">
         <SessionProvider>
           <CartProvider>
+          <ComparisonProvider>
           <ProductModalProvider>
             <Navbar />
             <main className="flex-1">{children}</main>
             <Footer />
           </ProductModalProvider>
+          </ComparisonProvider>
           </CartProvider>
         </SessionProvider>
       </body>

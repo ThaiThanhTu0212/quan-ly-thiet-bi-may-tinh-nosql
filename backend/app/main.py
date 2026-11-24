@@ -10,7 +10,8 @@ from pymongo.errors import ConnectionFailure
 
 from app.core.config import settings
 from app.database.connection import connect_to_mongo, close_mongo_connection
-from app.routers import auth, cart, products, pc_builder, orders, analytics, locations
+from app.routers import auth, cart, products, pc_builder, orders, analytics, locations, admin, account
+from app.services.images import UPLOAD_DIR
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,10 +39,11 @@ app.add_middleware(
 )
 
 # Đăng ký các Router API
-for router in (auth.router, cart.router, products.router, orders.router, analytics.router, locations.router):
+for router in (auth.router, cart.router, products.router, orders.router, analytics.router, locations.router, admin.router, account.router):
     app.include_router(router, prefix="/api/v1")
     for alias in {"/api", settings.API_V1_STR} - {"/api/v1"}:
         app.include_router(router, prefix=alias, include_in_schema=False)
+app.include_router(analytics.router, prefix="/api/v1/admin")
 app.include_router(pc_builder.router, prefix="/api/v1/builder")
 for prefix in {"/api", "/api/v1", settings.API_V1_STR}:
     app.include_router(pc_builder.router, prefix=prefix + "/pc-builder", include_in_schema=False)
@@ -66,6 +68,10 @@ async def invalid_request(_request: Request, error: RequestValidationError):
 images_dir = Path(__file__).resolve().parent.parent.parent / "images" / "images"
 if images_dir.exists():
     app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
+
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+for prefix in {"/api/v1", "/api", settings.API_V1_STR}:
+    app.mount(prefix + "/media", StaticFiles(directory=str(UPLOAD_DIR)), name="product-media-" + prefix)
 
 @app.get("/")
 async def root():

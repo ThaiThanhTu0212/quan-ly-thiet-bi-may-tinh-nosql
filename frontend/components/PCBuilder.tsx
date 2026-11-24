@@ -1,8 +1,9 @@
 'use client';
+import ProductImage from '@/components/ProductImage';
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { checkPCCompatibility, getProducts, getSharedBuild, savePCBuild, type CompatibilityResponse, type Product, type Selection } from '@/lib/api';
+import { checkPCCompatibility, getBuildRecommendations, type BuildRecommendation, getProducts, getSharedBuild, savePCBuild, type CompatibilityResponse, type Product, type Selection } from '@/lib/api';
 import { useCart } from '@/components/CartProvider';
 import { useSession } from '@/components/SessionProvider';
 import CompatibilityBanner from '@/components/CompatibilityBanner';
@@ -31,6 +32,10 @@ export default function PCBuilder({ shareCode }: { shareCode: string }) {
   const [copied, setCopied] = useState(false);
   const [retry, setRetry] = useState(0);
   const locked = useRef(false);
+  const [suggestions,setSuggestions] = useState<Record<string,BuildRecommendation[]> | null>(null);
+  const [suggesting,setSuggesting] = useState(false);
+  const [suggestionError,setSuggestionError] = useState('');
+  const [showAll,setShowAll] = useState(false);
 
   useEffect(() => {
     const request = new AbortController();
@@ -85,8 +90,19 @@ export default function PCBuilder({ shareCode }: { shareCode: string }) {
     return () => controller.abort();
   }, [selection, ready]);
 
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    setSuggestions(null); setSuggesting(true); setSuggestionError('');
+    const payload: Selection = Object.fromEntries(Object.entries(selection).filter(([,sku])=>sku).map(([slot,sku])=>[slot+'_sku',sku]));
+    getBuildRecommendations(payload,controller.signal).then(data=>{if(!controller.signal.aborted)setSuggestions(data.slots);})
+      .catch(e=>{if(!controller.signal.aborted)setSuggestionError(e.message);})
+      .finally(()=>{if(!controller.signal.aborted)setSuggesting(false);});
+    return()=>controller.abort();
+  },[selection,ready]);
+
   function select(slot: string, sku: string) {
-    setResult(null); setChecking(true);
+    setResult(null); setChecking(true); setSuggestions(null);
     setSelection(current => ({ ...current, [slot]: sku }));
     setShareUrl(''); setCopied(false); setActionError('');
   }
@@ -122,21 +138,38 @@ export default function PCBuilder({ shareCode }: { shareCode: string }) {
       {error && <p role="alert" className="text-rose-300">{error} <button onClick={() => setRetry(retry + 1)} className="underline">Thử lại</button></p>}
       {ready && (
         <>
+          <div className="space-y-2 rounded-xl border border-sky-900 bg-sky-950/20 p-4">
+            <h2 className="font-semibold">Gợi ý theo cấu hình đang chọn</h2>
+            <p className="text-sm text-slate-400">Ưu tiên linh kiện còn hàng và phù hợp với socket, RAM, kích thước case, công suất nguồn. Không tự xóa linh kiện bạn đã chọn.</p>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showAll} onChange={e=>setShowAll(e.target.checked)}/>Hiển thị cả linh kiện xung đột, hết hàng hoặc thiếu thông số</label>
+            {suggesting&&<p role="status" className="text-sm text-sky-300">Đang cập nhật gợi ý…</p>}
+            {suggestionError&&<p role="alert" className="text-sm text-amber-300">Không tải được gợi ý: {suggestionError}. Danh sách đầy đủ vẫn hiển thị; hãy kiểm tra cảnh báo cấu hình.</p>}
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             {slots.map(([slot, category, label]) => {
               const product = products.find(item => item.sku === selection[slot]);
+              const recommendations = suggestions?.[slot];
+              const rank = {compatible:0,warning:1,unknown:2,incompatible:3,out_of_stock:4};
+              const labels = {compatible:'Phù hợp',warning:'Có lưu ý',unknown:'Thiếu thông số',incompatible:'Xung đột',out_of_stock:'Hết hàng'};
+              const candidates = products.filter(item=>item.category.id===category).map(item=>({item,rec:recommendations?.find(r=>r.sku===item.sku)}))
+                .sort((a,b)=>(rank[a.rec?.status??'unknown']-rank[b.rec?.status??'unknown'])||a.item.price-b.item.price||a.item.sku.localeCompare(b.item.sku));
+              const visible = candidates.filter(({item,rec})=>showAll||!recommendations||item.sku===selection[slot]||rec?.status==='compatible'||rec?.status==='warning');
+              const chosenRecommendation = recommendations?.find(r=>r.sku===selection[slot]);
               return (
                 <div key={slot} className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
                   <label className="block space-y-2"><span className="font-semibold">{label}</span>
-                    <select value={selection[slot] ?? ''} onChange={e => select(slot, e.target.value)}
+                    <select disabled={suggesting} value={selection[slot] ?? ''} onChange={e => select(slot, e.target.value)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
                       <option value="">Chọn {label}</option>
                       {selection[slot] && !product && <option value={selection[slot]}>{selection[slot]} · Đã ngừng bán</option>}
-                      {products.filter(item => item.category.id === category).map(item => <option key={item.sku} value={item.sku}>{item.name} · {money(item.price)}{item.stock ? '' : ' · Hết hàng'}</option>)}
+                      {visible.map(({item,rec}) => <option key={item.sku} value={item.sku}>{item.name} — {money(item.price)}{rec?' — '+labels[rec.status]:item.stock?'':' — Hết hàng'}</option>)}
                     </select>
                   </label>
+                  {!visible.length&&<p className="text-xs text-amber-300">Chưa có lựa chọn phù hợp. Bật hiển thị tất cả để xem lý do hoặc thay đổi linh kiện khác.</p>}
+                  {recommendations&&candidates.length>visible.length&&<p className="text-xs text-slate-400">Đang ẩn {candidates.length-visible.length} linh kiện chưa phù hợp, thiếu thông số hoặc hết hàng.</p>}
+                  {chosenRecommendation&&<ul className={'list-inside list-disc space-y-1 text-xs '+(chosenRecommendation.status==='incompatible'||chosenRecommendation.status==='out_of_stock'?'text-rose-300':chosenRecommendation.status==='unknown'||chosenRecommendation.status==='warning'?'text-amber-300':'text-emerald-300')}>{chosenRecommendation.reasons.map((reason,i)=><li key={i}>{reason}</li>)}</ul>}
                   {product && <div className="flex items-center gap-3">
-                    {product.images[0] && <img src={product.images[0]} alt="" className="h-14 w-14 rounded bg-white object-contain" />}
+                    {product.images[0] && <ProductImage src={product.images[0]} alt="" className="h-14 w-14 rounded bg-white object-contain" />}
                     <div className="text-xs text-slate-400">
                       <p>{[product.specs.socket, product.specs.ram_type, product.specs.capacity_gb && product.specs.capacity_gb + ' GB'].filter(Boolean).join(' · ')}</p>
                       <p>{product.stock ? 'Còn ' + product.stock + ' sản phẩm' : 'Hết hàng'}</p>

@@ -38,7 +38,30 @@ export interface User {
   username: string;
   email: string;
   full_name: string;
+  phone?: string;
   role: 'admin' | 'customer';
+}
+
+export interface SavedAddress extends ShippingAddress { id: string; label: string }
+export interface AccountProfile { id: string; username: string; email: string; full_name: string; phone: string; addresses: SavedAddress[]; default_address_id: string | null }
+export type AddressWrite = ShippingAddress & { label: string; set_default: boolean };
+export function getAccount(signal?: AbortSignal) { return apiRequest<AccountProfile>('/account', { signal }); }
+export function saveProfile(full_name: string, phone: string) {
+  return apiRequest<AccountProfile>('/account', { method: 'PATCH', body: JSON.stringify({ full_name, phone }) });
+}
+export function saveAddress(address: AddressWrite, id?: string) {
+  return apiRequest<AccountProfile>('/account/addresses' + (id ? '/'+encodeURIComponent(id) : ''), { method: id ? 'PUT' : 'POST', body: JSON.stringify(address) });
+}
+export function deleteAddress(id: string) { return apiRequest<AccountProfile>('/account/addresses/'+encodeURIComponent(id), { method: 'DELETE' }); }
+export function setDefaultAddress(id: string) { return apiRequest<AccountProfile>('/account/addresses/'+encodeURIComponent(id)+'/default', { method: 'POST' }); }
+export function cancelOrder(code: string) { return apiRequest<{order_code:string;status:string}>('/orders/'+encodeURIComponent(code)+'/cancel', { method: 'POST' }); }
+export function getMyOrders(params: {status?: string;skip?: number;limit?: number}, signal?: AbortSignal) {
+  const query = new URLSearchParams(); Object.entries(params).forEach(([key,value])=>{if(value!==undefined&&value!=='')query.set(key,String(value));});
+  return apiRequest<Order[]>('/account/orders?'+query,{signal});
+}
+export function getComparison(skus: string[], signal?: AbortSignal) {
+  const query = new URLSearchParams(); skus.forEach(sku=>query.append('skus',sku));
+  return apiRequest<Product[]>('/products/compare?'+query, { signal });
 }
 
 export async function authRequest<T>(path: string, body?: Record<string, string>): Promise<T> {
@@ -174,8 +197,10 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const response = await fetch(API_BASE_URL + path, { cache: 'no-store', ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers } });
+    headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof data.detail === 'string' ? data.detail
@@ -188,6 +213,15 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 export function checkPCCompatibility(selection: Selection, signal?: AbortSignal) {
   return apiRequest<CompatibilityResponse>('/builder/check-compatibility',
+    { method: 'POST', body: JSON.stringify(selection), signal });
+}
+export interface BuildRecommendation {
+  sku: string;
+  status: 'compatible' | 'warning' | 'unknown' | 'incompatible' | 'out_of_stock';
+  reasons: string[];
+}
+export function getBuildRecommendations(selection: Selection, signal?: AbortSignal) {
+  return apiRequest<{ slots: Record<string, BuildRecommendation[]> }>('/builder/recommendations',
     { method: 'POST', body: JSON.stringify(selection), signal });
 }
 export function savePCBuild(build: { title: string; components: Record<string, string>; notes?: string }) {

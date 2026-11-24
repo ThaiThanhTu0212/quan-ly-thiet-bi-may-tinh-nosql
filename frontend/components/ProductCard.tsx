@@ -1,12 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
+import ProductImage from '@/components/ProductImage';
+import { CompareToggle } from '@/components/ComparisonProvider';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/components/CartProvider';
 import { useSession } from '@/components/SessionProvider';
 import { Product } from '@/lib/api';
 import { useProductModal } from '@/components/ProductModalProvider';
-import { ShoppingCart, Wrench, CheckCircle, AlertTriangle } from 'lucide-react';
+import { ShoppingCart, Wrench, CheckCircle, AlertTriangle, Eye } from 'lucide-react';
 
 interface ProductCardProps {
   product: Product;
@@ -32,7 +35,7 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
   };
 
   // Lấy ảnh đầu tiên hoặc fallback
-  const imageSrc = product.images && product.images.length > 0 ? product.images[0] : '/images/background_login.jpg';
+  const imageSrc = product.images?.[0];
 
   const isLowStock = product.stock <= product.min_stock_alert && product.stock > 0;
   const isOutOfStock = product.stock === 0;
@@ -41,15 +44,14 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition-all hover:shadow-xl hover:shadow-sky-500/5 flex flex-col group">
       {/* Product Image */}
       <div className="relative h-48 w-full bg-slate-950 flex items-center justify-center p-4 overflow-hidden">
-        <img
+        <Link href={'/products/' + encodeURIComponent(product.sku)} className="flex h-full w-full items-center justify-center">
+        <ProductImage
           src={imageSrc}
           alt={product.name}
           className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
-          onError={(e) => {
-            // Fallback placeholder nếu đường dẫn ảnh bị lỗi
-            (e.target as HTMLElement).style.display = 'none';
-          }}
+
         />
+        </Link>
         <div className="absolute top-2 left-2 flex gap-1">
           <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
             {product.category?.name || 'Linh kiện'}
@@ -82,9 +84,9 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
         <div>
           <span className="text-[11px] font-mono text-slate-500">{product.sku}</span>
           <h3 className="font-semibold text-white text-sm line-clamp-2 mt-0.5 group-hover:text-sky-400 transition-colors">
-            <button type="button" onClick={() => showProduct(product.sku)} className="text-left hover:underline">
+            <Link href={'/products/' + encodeURIComponent(product.sku)} className="text-left hover:underline">
               {product.name}
-            </button>
+            </Link>
           </h3>
 
           {/* Dynamic Specs highlights */}
@@ -128,6 +130,7 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
           </div>
 
           <div className="flex items-center space-x-1.5">
+            <button type="button" onClick={() => showProduct(product.sku)} title="Xem nhanh" aria-label={'Xem nhanh ' + product.name} className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:text-sky-300"><Eye className="h-4 w-4" /></button>
             {onSelectForBuild && (
               <button
                 onClick={() => onSelectForBuild(product)}
@@ -155,6 +158,7 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
             )}
           </div>
         </div>
+        <div className="mt-3"><CompareToggle product={product}/></div>
         {error && <p role="alert" className="mt-2 text-xs text-rose-300">{error}</p>}
       </div>
     </div>

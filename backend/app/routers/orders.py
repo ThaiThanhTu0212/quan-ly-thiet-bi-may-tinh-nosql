@@ -1,107 +1,153 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pymongo.errors import DuplicateKeyError, OperationFailure
+from pymongo.read_concern import ReadConcern
+from pymongo.write_concern import WriteConcern
+
 from app.database.connection import get_database
-from app.models.order import OrderCreateRequest, OrderResponse, OrderDates
+from app.models.order import OrderCreateRequest, OrderResponse
+from app.models.user import UserResponse
+from app.routers.auth import check_origin, require_admin, require_user
+from app.services.cart import combine_items
 
-router = APIRouter(prefix="/orders", tags=["Orders"])
+router = APIRouter(prefix="/orders", tags=["Orders"], dependencies=[Depends(check_origin)])
 
-@router.post("", response_model=OrderResponse)
-async def create_order(payload: OrderCreateRequest):
-    """
-    Tạo đơn đặt hàng mới sử dụng Snapshot Pattern (nhúng items với giá và tên tại thời điểm mua),
-    đồng thời kiểm tra và trừ tồn kho (stock) của sản phẩm.
-    """
+
+def owner_filter(user):
+    return {"$or": [{"user_id": user.id}, {"user_id": {"$exists": False}, "customer_email": user.email}]}
+
+
+async def validate_address(db, address, session):
+    province = await db.locations.find_one({"province_name": address.province}, session=session)
+    districts = province.get("districts", []) if province else []
+    district = next((item for item in districts if item["district_name"] == address.district), None)
+    if not district or not any(ward["ward_name"] == address.ward for ward in district["wards"]):
+        raise HTTPException(422, "Địa chỉ tỉnh, huyện và xã không hợp lệ.")
+
+
+@router.post("", response_model=OrderResponse, status_code=201)
+async def create_order(payload: OrderCreateRequest, user: UserResponse = Depends(require_user)):
     db = get_database()
+    identity = {"user_id": user.id, "request_id": payload.request_id}
+    existing = await db.orders.find_one(identity, {"_id": 0})
+    if existing:
+        return existing
+    quantities = combine_items(payload.items)
+    order_code = f"DH_{uuid.uuid4().hex.upper()}"
 
-    if not payload.items:
-        raise HTTPException(status_code=400, detail="Đơn hàng phải chứa ít nhất 1 sản phẩm.")
-
-    # 1. Kiểm tra tồn kho của từng sản phẩm
-    skus = [item.sku for item in payload.items]
-    products_cursor = db.products.find({"sku": {"$in": skus}})
-    product_map = {doc["sku"]: doc async for doc in products_cursor}
-
-    for item in payload.items:
-        prod = product_map.get(item.sku)
-        if not prod:
-            raise HTTPException(status_code=404, detail=f"Không tìm thấy sản phẩm SKU: {item.sku}")
-        if prod.get("stock", 0) < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm '{prod['name']}' không đủ hàng trong kho (Còn {prod.get('stock', 0)}, yêu cầu {item.quantity})."
+    async def place_order(session):
+        existing = await db.orders.find_one(identity, {"_id": 0}, session=session)
+        if existing:
+            return existing
+        buyer = await db.users.find_one({"_id": ObjectId(user.id)}, session=session)
+        if buyer is None:
+            raise HTTPException(401, "Tài khoản không còn tồn tại.")
+        cart = combine_items(buyer.get("cart", []))
+        for sku, quantity in quantities.items():
+            if quantity > cart.get(sku, 0):
+                raise HTTPException(409, "Giỏ hàng vừa thay đổi. Vui lòng kiểm tra lại.")
+        await validate_address(db, payload.shipping_address, session)
+        products = await db.products.find({"sku": {"$in": list(quantities)}}, session=session).to_list(None)
+        product_map = {product["sku"]: product for product in products}
+        snapshots = []
+        for sku, quantity in quantities.items():
+            product = product_map.get(sku)
+            if product is None or product.get("stock", 0) < quantity:
+                raise HTTPException(409, f"Linh kiện {sku} không đủ hàng.")
+            snapshots.append({
+                "product_id": str(product["_id"]), "sku": sku, "name": product["name"],
+                "quantity": quantity, "unit_price": product["price"],
+            })
+        total = sum(item["quantity"] * item["unit_price"] for item in snapshots)
+        if payload.expected_total is not None and total != payload.expected_total:
+            raise HTTPException(409, "Giá linh kiện đã thay đổi. Vui lòng tải lại giỏ hàng trước khi đặt.")
+        for item in snapshots:
+            result = await db.products.update_one(
+                {"sku": item["sku"], "stock": {"$gte": item["quantity"]}},
+                {"$inc": {"stock": -item["quantity"]}}, session=session,
             )
-
-    # 2. Tính tổng tiền & chuẩn bị snapshot
-    total_amount = sum(item.unit_price * item.quantity for item in payload.items)
-    order_code = f"DH_{uuid.uuid4().hex[:6].upper()}"
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    order_doc = {
-        "order_code": order_code,
-        "customer_email": payload.customer_email,
-        "shipping_address": payload.shipping_address.model_dump(),
-        "items": [item.model_dump() for item in payload.items],
-        "total_amount": total_amount,
-        "status": "Đang giao",
-        "payment_status": "Đã thanh toán" if payload.payment_method == "Chuyển khoản VNPAY" else "Chưa thanh toán",
-        "payment_method": payload.payment_method,
-        "dates": {
-            "created_at": now_iso,
-            "paid_at": now_iso if payload.payment_method == "Chuyển khoản VNPAY" else None,
-            "estimated_delivery": None
+            if result.modified_count != 1:
+                raise HTTPException(409, f"Linh kiện {item['sku']} vừa hết hàng.")
+        now = datetime.now(timezone.utc).isoformat()
+        order = {
+            **identity, "order_code": order_code, "customer_email": user.email,
+            "shipping_address": payload.shipping_address.model_dump(), "items": snapshots,
+            "total_amount": total, "status": "Chờ xác nhận", "payment_status": "Chưa thanh toán",
+            "payment_method": payload.payment_method,
+            "dates": {"created_at": now, "paid_at": None, "estimated_delivery": None},
         }
-    }
+        await db.orders.insert_one(order, session=session)
+        remainder = [
+            {"sku": sku, "quantity": qty - quantities.get(sku, 0)}
+            for sku, qty in cart.items() if qty > quantities.get(sku, 0)
+        ]
+        await db.users.update_one({"_id": buyer["_id"]}, {"$set": {"cart": remainder}}, session=session)
+        order.pop("_id", None)
+        return order
 
-    # 3. Trừ tồn kho sản phẩm bằng Atomic Updates
-    for item in payload.items:
-        await db.products.update_one(
-            {"sku": item.sku, "stock": {"$gte": item.quantity}},
-            {"$inc": {"stock": -item.quantity}}
-        )
+    try:
+        async with await db.client.start_session() as session:
+            return await session.with_transaction(
+                place_order, read_concern=ReadConcern("snapshot"), write_concern=WriteConcern("majority")
+            )
+    except DuplicateKeyError:
+        existing = await db.orders.find_one(identity, {"_id": 0})
+        if existing:
+            return existing
+        raise
+    except OperationFailure as error:
+        if error.code in (20, 303):
+            raise HTTPException(503, "Đặt hàng cần MongoDB Atlas hoặc replica set. Hãy cấu hình MongoDB rồi thử lại.") from None
+        raise
 
-    # 4. Lưu đơn hàng vào MongoDB
-    await db.orders.insert_one(order_doc)
 
-    # Xóa _id trước khi trả về
-    order_doc.pop("_id", None)
-    return OrderResponse(**order_doc)
-
-@router.get("", response_model=List[OrderResponse])
+@router.get("", response_model=list[OrderResponse])
 async def get_orders(
-    customer_email: Optional[str] = Query(None),
-    status: Optional[str] = Query(None, description="Đang giao, Đã giao, Đã hủy"),
-    limit: int = 50
+    customer_email: str | None = None, status: str | None = None,
+    limit: int = Query(50, ge=1, le=100), skip: int = Query(0, ge=0),
+    user: UserResponse = Depends(require_user),
 ):
-    """Lấy danh sách đơn đặt hàng."""
-    db = get_database()
-    filter_query = {}
-    if customer_email:
-        filter_query["customer_email"] = customer_email
+    query = {} if user.role == "admin" else owner_filter(user)
+    if customer_email and user.role == "admin":
+        query["customer_email"] = customer_email
     if status:
-        filter_query["status"] = status
+        query["status"] = status
+    return await get_database().orders.find(query, {"_id": 0}).sort(
+        [("dates.created_at", -1), ("order_code", 1)]
+    ).skip(skip).limit(limit).to_list(limit)
 
-    cursor = db.orders.find(filter_query, {"_id": 0}).sort("dates.created_at", -1).limit(limit)
-    return await cursor.to_list(length=limit)
 
 @router.get("/{order_code}", response_model=OrderResponse)
-async def get_order_by_code(order_code: str):
-    """Chi tiết đơn hàng theo mã đơn."""
-    db = get_database()
-    order = await db.orders.find_one({"order_code": order_code}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng {order_code}")
+async def get_order_by_code(order_code: str, user: UserResponse = Depends(require_user)):
+    query = {} if user.role == "admin" else owner_filter(user)
+    query["order_code"] = order_code
+    order = await get_database().orders.find_one(query, {"_id": 0})
+    if order is None:
+        raise HTTPException(404, "Không tìm thấy đơn hàng.")
     return order
 
-@router.patch("/{order_code}/status")
-async def update_order_status(order_code: str, status: str = Query(..., regex="^(Đang giao|Đã giao|Đã hủy)$")):
-    """Cập nhật trạng thái đơn hàng (Dành cho Admin)."""
+
+@router.patch("/{order_code}/status", dependencies=[Depends(require_admin)])
+async def update_order_status(order_code: str, status: str = Query(pattern="^(Chờ xác nhận|Đang giao|Đã giao|Đã hủy)$")):
+    # Cancellation restores stock in the same transaction.
     db = get_database()
-    result = await db.orders.update_one(
-        {"order_code": order_code},
-        {"$set": {"status": status}}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng {order_code}")
-    return {"message": "Cập nhật trạng thái thành công", "order_code": order_code, "status": status}
+    async def update(session):
+        order = await db.orders.find_one({"order_code": order_code}, session=session)
+        if order is None:
+            raise HTTPException(404, "Không tìm thấy đơn hàng.")
+        old = order["status"]
+        if old == status:
+            return {"order_code": order_code, "status": status}
+        transitions = {"Chờ xác nhận": {"Đang giao", "Đã hủy"}, "Đang giao": {"Đã giao", "Đã hủy"}}
+        if status not in transitions.get(old, set()):
+            raise HTTPException(409, "Không thể chuyển trạng thái đơn hàng.")
+        if status == "Đã hủy":
+            for item in order["items"]:
+                await db.products.update_one({"sku": item["sku"]}, {"$inc": {"stock": item["quantity"]}}, session=session)
+        await db.orders.update_one({"_id": order["_id"]}, {"$set": {"status": status}}, session=session)
+        return {"order_code": order_code, "status": status}
+    async with await db.client.start_session() as session:
+        return await session.with_transaction(update)

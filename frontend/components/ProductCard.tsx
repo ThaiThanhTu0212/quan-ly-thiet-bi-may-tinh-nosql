@@ -1,8 +1,11 @@
 'use client';
 
-import React from 'react';
-import Image from 'next/image';
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCart } from '@/components/CartProvider';
+import { useSession } from '@/components/SessionProvider';
 import { Product } from '@/lib/api';
+import { useProductModal } from '@/components/ProductModalProvider';
 import { ShoppingCart, Wrench, CheckCircle, AlertTriangle } from 'lucide-react';
 
 interface ProductCardProps {
@@ -12,6 +15,18 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, onAddToCart, onSelectForBuild }: ProductCardProps) {
+  const showProduct = useProductModal();
+  const cart = useCart();
+  const { user } = useSession();
+  const router = useRouter();
+  const [error, setError] = useState('');
+  async function addProduct() {
+    setError('');
+    if (onAddToCart) { onAddToCart(product); return; }
+    if (!user) { router.push('/login'); return; }
+    try { await cart.add([{ sku: product.sku, quantity: 1 }]); }
+    catch (err) { setError((err as Error).message); }
+  }
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price);
   };
@@ -67,7 +82,9 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
         <div>
           <span className="text-[11px] font-mono text-slate-500">{product.sku}</span>
           <h3 className="font-semibold text-white text-sm line-clamp-2 mt-0.5 group-hover:text-sky-400 transition-colors">
-            {product.name}
+            <button type="button" onClick={() => showProduct(product.sku)} className="text-left hover:underline">
+              {product.name}
+            </button>
           </h3>
 
           {/* Dynamic Specs highlights */}
@@ -120,10 +137,12 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
                 <Wrench className="w-4 h-4" />
               </button>
             )}
-            {onAddToCart && (
+            {(
               <button
-                disabled={isOutOfStock}
-                onClick={() => onAddToCart(product)}
+                type="button"
+                disabled={isOutOfStock || cart.busy}
+                onClick={addProduct}
+                aria-label={'Thêm ' + product.name + ' vào giỏ hàng'}
                 title="Thêm vào giỏ hàng"
                 className={`p-2 rounded-lg transition-colors ${
                   isOutOfStock
@@ -136,6 +155,7 @@ export default function ProductCard({ product, onAddToCart, onSelectForBuild }: 
             )}
           </div>
         </div>
+        {error && <p role="alert" className="mt-2 text-xs text-rose-300">{error}</p>}
       </div>
     </div>
   );

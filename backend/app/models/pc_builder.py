@@ -1,37 +1,37 @@
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from typing import Any
+from pydantic import BaseModel, Field, ConfigDict
 
 class CompatibilityCheckRequest(BaseModel):
-    cpu_sku: Optional[str] = None
-    mainboard_sku: Optional[str] = None
-    ram_sku: Optional[str] = None
-    gpu_sku: Optional[str] = None
-    psu_sku: Optional[str] = None
-    storage_sku: Optional[str] = None
-    case_sku: Optional[str] = None
-    cooler_sku: Optional[str] = None
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    cpu_sku: str | None = None
+    mainboard_sku: str | None = None
+    ram_sku: str | None = None
+    gpu_sku: str | None = None
+    psu_sku: str | None = None
+    storage_sku: str | None = None
+    case_sku: str | None = None
+    cooler_sku: str | None = None
 
 class CompatibilityMessage(BaseModel):
-    type: str  # "success" | "warning" | "error"
+    type: str
     component: str
     message: str
 
 class CompatibilityCheckResponse(BaseModel):
     is_compatible: bool
-    messages: List[CompatibilityMessage]
+    messages: list[CompatibilityMessage]
     estimated_wattage: int
     recommended_psu_wattage: int
     total_price: float
-    components: Dict[str, Any] = {}
+    components: dict[str, Any] = Field(default_factory=dict)
 
 class PCBuildSaveRequest(BaseModel):
-    title: str
-    author: Optional[str] = "customer@pcbuilder.vn"
-    components: Dict[str, Any]
-    total_price: float
-    estimated_wattage: int
-    is_compatible: bool
-    notes: Optional[str] = ""
+    title: str = Field(min_length=1, max_length=100)
+    components: dict[str, Any]
+    notes: str = Field(default="", max_length=1000)
 
 class PCBuildResponse(PCBuildSaveRequest):
     build_code: str
+    total_price: float
+    estimated_wattage: int
+    is_compatible: bool

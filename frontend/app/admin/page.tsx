@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useSession } from '@/components/SessionProvider';
 import {
   getAnalyticsOverview,
   getRevenueByStatus,
@@ -22,6 +24,7 @@ import {
 } from 'lucide-react';
 
 export default function AdminDashboardPage() {
+  const { user, pending } = useSession();
   const [overview, setOverview] = useState<any>(null);
   const [revenueStatus, setRevenueStatus] = useState<any[]>([]);
   const [topProducts, setTopProducts] = useState<any[]>([]);
@@ -29,6 +32,7 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (user?.role !== 'admin') return;
     async function loadDashboard() {
       try {
         const [ov, rev, top, low] = await Promise.all([
@@ -48,7 +52,11 @@ export default function AdminDashboardPage() {
       }
     }
     loadDashboard();
-  }, []);
+  }, [user?.role]);
+
+  if (pending) return <p role="status" className="p-8 text-center">Đang kiểm tra phiên đăng nhập…</p>;
+  if (!user) return <p className="p-8 text-center"><Link className="text-sky-300 underline" href="/login">Đăng nhập</Link> để mở trang quản trị.</p>;
+  if (user.role !== 'admin') return <p role="alert" className="p-8 text-center">Chức năng này yêu cầu quyền quản trị.</p>;
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price);

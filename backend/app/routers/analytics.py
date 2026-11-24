@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.database.connection import get_database
+from app.routers.auth import require_admin
 
-router = APIRouter(prefix="/analytics", tags=["Admin & Analytics (Aggregation Pipelines)"])
+router = APIRouter(prefix="/analytics", tags=["Admin & Analytics (Aggregation Pipelines)"],
+                   dependencies=[Depends(require_admin)])
 
 @router.get("/overview")
 async def get_analytics_overview():

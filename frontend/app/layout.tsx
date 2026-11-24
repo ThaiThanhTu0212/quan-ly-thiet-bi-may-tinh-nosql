@@ -1,8 +1,12 @@
 import React from 'react';
 import type { Metadata } from 'next';
+import '@fontsource-variable/inter';
 import './globals.css';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import { SessionProvider } from '@/components/SessionProvider';
+import { ProductModalProvider } from '@/components/ProductModalProvider';
+import { CartProvider } from '@/components/CartProvider';
 
 export const metadata: Metadata = {
   title: 'PC Builder Store - NoSQL MongoDB Project',
@@ -17,11 +21,15 @@ export default function RootLayout({
   return (
     <html lang="vi" className="dark">
       <body className="bg-slate-950 text-slate-100 flex flex-col min-h-screen">
-        <Navbar />
-        <main className="flex-1">
-          {children}
-        </main>
-        <Footer />
+        <SessionProvider>
+          <CartProvider>
+          <ProductModalProvider>
+            <Navbar />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </ProductModalProvider>
+          </CartProvider>
+        </SessionProvider>
       </body>
     </html>
   );

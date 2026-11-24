@@ -128,7 +128,7 @@ ORDER_SCHEMA: Dict[str, Any] = {
                 "description": "Tổng tiền đơn hàng (VND)"
             },
             "status": {
-                "enum": ["Đang giao", "Đã giao", "Đã hủy"],
+                "enum": ["Chờ xác nhận", "Đang giao", "Đã giao", "Đã hủy"],
                 "description": "Trạng thái đơn hàng theo đúng ràng buộc SQL cũ"
             },
             "payment_status": {
@@ -157,7 +157,7 @@ ORDER_SCHEMA: Dict[str, Any] = {
 USER_SCHEMA: Dict[str, Any] = {
     "$jsonSchema": {
         "bsonType": "object",
-        "required": ["username", "email", "role"],
+        "required": ["username", "email", "password_hash", "role", "cart"],
         "properties": {
             "username": {
                 "bsonType": "string",
@@ -329,8 +329,16 @@ def create_all_indexes(db):
     # 1. Indexes cho 'products'
     # Wildcard Index trên "specs.$**" giúp lọc theo bất kỳ thông số kỹ thuật nào
     db.products.create_index([("specs.$**", 1)], name="idx_wildcard_specs")
-    # Text Index trên 'name' và 'description' cho full-text search
-    db.products.create_index([("name", "text"), ("description", "text")], name="idx_text_name_desc")
+    # MongoDB cho phép một text index mỗi collection.
+    indexes = db.products.index_information()
+    if "idx_text_name_desc" in indexes:
+        db.products.drop_index("idx_text_name_desc")
+    db.products.create_index(
+        [("name", "text"), ("brand.name", "text"), ("description", "text"), ("sku", "text")],
+        name="idx_text_name_brand_desc",
+        weights={"name": 10, "brand.name": 5, "description": 1, "sku": 10},
+        default_language="none",
+    )
     # Unique Index cho SKU
     db.products.create_index([("sku", 1)], unique=True, name="idx_unique_sku")
     # Compound Index hỗ trợ lọc nhanh theo danh mục và giá
@@ -345,6 +353,11 @@ def create_all_indexes(db):
     db.orders.create_index([("customer_email", 1)], name="idx_customer_email")
     print(" [V] Created Indexes for 'orders' (status, created_at, customer_email).")
 
+    db.orders.create_index(
+        [("user_id", 1), ("request_id", 1)], unique=True, name="idx_user_checkout_request",
+        partialFilterExpression={"user_id": {"$type": "string"}, "request_id": {"$type": "string"}},
+    )
+    db.orders.create_index([("user_id", 1), ("dates.created_at", -1)], name="idx_user_orders")
     # 3. Indexes cho 'users'
     db.users.create_index([("username", 1)], unique=True, name="idx_unique_username")
     db.users.create_index([("email", 1)], unique=True, name="idx_unique_email")
@@ -358,3 +371,9 @@ def create_all_indexes(db):
     db.pc_builds.create_index([("build_code", 1)], unique=True, sparse=True, name="idx_unique_build_code")
     db.pc_builds.create_index([("author", 1)], name="idx_build_author")
     print(" [V] Created Indexes for 'pc_builds'.")
+
+
+if __name__ == "__main__":
+    from seed import run_seed
+
+    run_seed(schema_only=True)

@@ -44,11 +44,11 @@ export default function CompatibilityBanner({ data, loading }: CompatibilityBann
           )}
           <div>
             <h3 className={`font-bold text-lg ${data.is_compatible ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {data.is_compatible ? 'Cấu hình hoàn toàn tương thích!' : 'Phát hiện xung đột linh kiện!'}
+              {data.is_compatible ? 'Các linh kiện đã chọn chưa có xung đột' : 'Phát hiện xung đột linh kiện!'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               {data.is_compatible
-                ? 'Tất cả socket, chuẩn RAM và công suất nguồn đều phù hợp để hoạt động ổn định.'
+                ? 'Kiểm tra các lưu ý bên dưới và tiếp tục bổ sung linh kiện cho cấu hình.'
                 : 'Vui lòng kiểm tra lại các linh kiện bị xung đột socket hoặc thiếu công suất nguồn bên dưới.'}
             </p>
           </div>

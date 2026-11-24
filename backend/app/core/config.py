@@ -1,4 +1,4 @@
-import os
+import secrets
 from typing import List
 from pydantic_settings import BaseSettings
 from pathlib import Path
@@ -9,7 +9,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings(BaseSettings):
     PROJECT_NAME: str = "PC Builder E-Commerce API"
     VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api"
+    API_V1_STR: str = "/api/v1"
 
     # Server config
     HOST: str = "0.0.0.0"
@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     DB_NAME: str = "QuanLyThietBiMayTinh"
 
     # JWT Config
-    JWT_SECRET: str = "supersecret_pcbuilder_2026_nosql_key"
-    JWT_ALGORITHM: str = "HS256"
+    JWT_SECRET: str = ""
+    AUTH_COOKIE_SECURE: bool = False
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
     # CORS
@@ -37,3 +37,5 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+if not settings.JWT_SECRET:
+    settings.JWT_SECRET = secrets.token_urlsafe(48)

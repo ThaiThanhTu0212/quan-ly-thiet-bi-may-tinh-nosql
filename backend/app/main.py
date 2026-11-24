@@ -1,21 +1,25 @@
-import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from pymongo.errors import ConnectionFailure
 
 from app.core.config import settings
 from app.database.connection import connect_to_mongo, close_mongo_connection
-from app.routers import products, pc_builder, orders, analytics, locations
+from app.routers import auth, cart, products, pc_builder, orders, analytics, locations
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Khởi động kết nối MongoDB
     await connect_to_mongo()
-    yield
-    # Ngắt kết nối MongoDB khi tắt server
-    await close_mongo_connection()
+    try:
+        yield
+    finally:
+        await close_mongo_connection()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -27,18 +31,36 @@ app = FastAPI(
 # Cấu hình CORS cho phép Frontend Next.js gọi API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Trong môi trường dev cho phép gọi từ localhost:3000
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Đăng ký các Router API
-app.include_router(products.router, prefix=settings.API_V1_STR)
-app.include_router(pc_builder.router, prefix=settings.API_V1_STR)
-app.include_router(orders.router, prefix=settings.API_V1_STR)
-app.include_router(analytics.router, prefix=settings.API_V1_STR)
-app.include_router(locations.router, prefix=settings.API_V1_STR)
+for router in (auth.router, cart.router, products.router, orders.router, analytics.router, locations.router):
+    app.include_router(router, prefix="/api/v1")
+    for alias in {"/api", settings.API_V1_STR} - {"/api/v1"}:
+        app.include_router(router, prefix=alias, include_in_schema=False)
+app.include_router(pc_builder.router, prefix="/api/v1/builder")
+for prefix in {"/api", "/api/v1", settings.API_V1_STR}:
+    app.include_router(pc_builder.router, prefix=prefix + "/pc-builder", include_in_schema=False)
+
+
+@app.exception_handler(ConnectionFailure)
+async def database_unavailable(_request: Request, _error: ConnectionFailure):
+    return JSONResponse(status_code=503, content={"detail": "MongoDB chưa sẵn sàng. Vui lòng thử lại."})
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request: Request, error: RequestValidationError):
+    if "/auth/" not in _request.url.path:
+        return await request_validation_exception_handler(_request, error)
+    details = [
+        {key: issue[key] for key in ("loc", "msg", "type")}
+        for issue in error.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
 
 # Phục vụ file tĩnh ảnh sản phẩm nếu có
 images_dir = Path(__file__).resolve().parent.parent.parent / "images" / "images"

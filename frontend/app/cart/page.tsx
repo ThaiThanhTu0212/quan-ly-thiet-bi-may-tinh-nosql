@@ -1,4 +1,5 @@
 'use client';
+import ProductImage from '@/components/ProductImage';
 
 import Link from 'next/link';
 import { useCart } from '@/components/CartProvider';
@@ -26,7 +27,7 @@ function CartContents() {
             {cart.items.map(({ sku, quantity, product }) => (
               <li key={sku} className="flex flex-wrap items-center justify-between gap-4 py-5">
                 <div className="flex min-w-0 items-center gap-3">
-                  {product?.images[0] && <img src={product.images[0]} alt="" className="h-16 w-16 rounded-lg bg-white object-contain" />}
+                  {product?.images[0] && <ProductImage src={product.images[0]} alt="" className="h-16 w-16 rounded-lg bg-white object-contain" />}
                   <div><p className="font-semibold">{product?.name ?? sku}</p>
                     <p className="text-sm text-slate-400">{product ? money(product.price) : 'Sản phẩm đã ngừng bán'}</p>
                     {product && quantity > product.stock && <p className="text-sm text-rose-300">Chỉ còn {product.stock} sản phẩm trong kho.</p>}

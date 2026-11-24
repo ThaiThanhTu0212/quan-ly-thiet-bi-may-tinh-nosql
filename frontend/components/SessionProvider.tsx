@@ -8,6 +8,7 @@ interface Session {
   pending: boolean;
   login: (username: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const SessionContext = createContext<Session | null>(null);
@@ -36,7 +37,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  return <SessionContext.Provider value={{ user, pending, login, logout }}>{children}</SessionContext.Provider>;
+  async function refresh() { setUser(await authRequest<User>('me')); }
+
+  return <SessionContext.Provider value={{ user, pending, login, logout, refresh }}>{children}</SessionContext.Provider>;
 }
 
 export function useSession() {

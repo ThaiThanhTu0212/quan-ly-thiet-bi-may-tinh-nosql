@@ -1,4 +1,7 @@
 'use client';
+import ProductImage from '@/components/ProductImage';
+import Link from 'next/link';
+import { specLabel, specValue } from '@/lib/product-specs';
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
@@ -47,17 +50,18 @@ export function ProductModalProvider({ children }: { children: ReactNode }) {
         {!product && !error && <p role="status" className="mt-4 text-slate-400">Đang tải chi tiết…</p>}
         {product && (
           <div className="mt-4 space-y-4">
-            {product.images[0] && <img src={product.images[0]} alt={product.name} className="mx-auto h-40 object-contain" />}
+            {product.images[0] && <ProductImage src={product.images[0]} alt={product.name} className="mx-auto h-40 object-contain" />}
             <p className="font-semibold text-sky-300">{product.price.toLocaleString('vi-VN')} ₫ · {product.stock ? `Còn ${product.stock} sản phẩm` : 'Hết hàng'}</p>
             {product.description && <p className="text-sm text-slate-300">{product.description}</p>}
             <dl className="divide-y divide-slate-800 text-sm">
               {Object.entries(product.specs).map(([key, value]) => (
                 <div key={key} className="grid grid-cols-2 gap-4 py-2">
-                  <dt className="text-slate-400">{key.replaceAll('_', ' ')}</dt>
-                  <dd>{typeof value === 'boolean' ? (value ? 'Có' : 'Không') : Array.isArray(value) ? value.join(', ') : String(value)}</dd>
+                  <dt className="text-slate-400">{specLabel(product.category.id,key)}</dt>
+                  <dd>{specValue(value)}</dd>
                 </div>
               ))}
             </dl>
+            <Link href={'/products/'+encodeURIComponent(product.sku)} onClick={()=>dialog.current?.close()} className="inline-block rounded-lg bg-sky-600 px-4 py-3 font-semibold">Xem đầy đủ và mua hàng</Link>
           </div>
         )}
       </dialog>

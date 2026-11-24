@@ -170,6 +170,17 @@ async def get_best_sellers(limit: int = Query(8, ge=1, le=30)):
     return [by_sku[sku] for sku in skus if sku in by_sku][:limit]
 
 
+@router.get("/compare", response_model=list[ProductResponse])
+async def compare_products(skus: list[str] = Query(min_length=2, max_length=4)):
+    if not 2 <= len(skus) <= 4 or len(set(skus)) != len(skus) or any(not sku or len(sku) > 64 for sku in skus):
+        raise HTTPException(422, "Chọn 2–4 SKU khác nhau để so sánh.")
+    docs = await get_database().products.find({"sku": {"$in": skus}}, {"_id": 0}).to_list(4)
+    by_sku = {doc["sku"]: doc for doc in docs}
+    if any(sku not in by_sku for sku in skus): raise HTTPException(404, "Có linh kiện đã ngừng bán. Hãy bỏ linh kiện đó khỏi bảng so sánh.")
+    if len({doc["category"]["id"] for doc in docs}) != 1: raise HTTPException(422, "Chỉ so sánh các linh kiện cùng danh mục.")
+    return [by_sku[sku] for sku in skus]
+
+
 @router.get("/{sku}", response_model=ProductResponse)
 async def get_product_by_sku(sku: str):
     """Lấy chi tiết linh kiện theo mã SKU."""

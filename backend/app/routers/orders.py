@@ -59,7 +59,7 @@ async def create_order(payload: OrderCreateRequest, user: UserResponse = Depends
                 raise HTTPException(409, f"Linh kiện {sku} không đủ hàng.")
             snapshots.append({
                 "product_id": str(product["_id"]), "sku": sku, "name": product["name"],
-                "quantity": quantity, "unit_price": product["price"],
+                "quantity": quantity, "unit_price": product["price"], "category": product.get("category"),
             })
         total = sum(item["quantity"] * item["unit_price"] for item in snapshots)
         if payload.expected_total is not None and total != payload.expected_total:
@@ -147,7 +147,35 @@ async def update_order_status(order_code: str, status: str = Query(pattern="^(Ch
         if status == "Đã hủy":
             for item in order["items"]:
                 await db.products.update_one({"sku": item["sku"]}, {"$inc": {"stock": item["quantity"]}}, session=session)
-        await db.orders.update_one({"_id": order["_id"]}, {"$set": {"status": status}}, session=session)
+        changes = {"status": status}
+        if status == "Đã giao" and order.get("payment_method", "COD") == "COD":
+            changes["payment_status"] = "Đã thanh toán"
+            changes["dates.paid_at"] = datetime.now(timezone.utc).isoformat()
+        await db.orders.update_one({"_id": order["_id"]}, {"$set": changes}, session=session)
         return {"order_code": order_code, "status": status}
     async with await db.client.start_session() as session:
         return await session.with_transaction(update)
+
+
+@router.post("/{order_code}/cancel")
+async def cancel_my_order(order_code: str, user: UserResponse = Depends(require_user)):
+    db = get_database()
+    async def cancel(session):
+        # Ownership is enforced even for an admin using this customer endpoint.
+        order = await db.orders.find_one({**owner_filter(user), "order_code": order_code}, session=session)
+        if order is None: raise HTTPException(404, "Không tìm thấy đơn hàng của bạn.")
+        if order["status"] == "Đã hủy": return {"order_code": order_code, "status": "Đã hủy"}
+        if order["status"] != "Chờ xác nhận": raise HTTPException(409, "Chỉ có thể hủy đơn đang chờ xác nhận.")
+        for item in order["items"]:
+            await db.products.update_one({"sku": item["sku"]}, {"$inc": {"stock": item["quantity"]}}, session=session)
+        result = await db.orders.update_one({"_id": order["_id"], "status": "Chờ xác nhận"}, {"$set": {
+            "status": "Đã hủy", "cancelled_by": user.id, "dates.cancelled_at": datetime.now(timezone.utc).isoformat(),
+        }}, session=session)
+        if result.modified_count != 1: raise HTTPException(409, "Đơn hàng vừa thay đổi. Vui lòng tải lại.")
+        return {"order_code": order_code, "status": "Đã hủy"}
+    try:
+        async with await db.client.start_session() as session:
+            return await session.with_transaction(cancel)
+    except OperationFailure as error:
+        if error.code in (20, 303): raise HTTPException(503, "Hủy đơn cần MongoDB Atlas hoặc replica set.") from None
+        raise

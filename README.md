@@ -255,3 +255,77 @@ Remove-Item Env:\TEST_MONGODB_URI
 Kiểm thử tích hợp tạo một database week2_test_ có mã ngẫu nhiên cho mỗi test rồi xóa đúng database đó khi xong. Các ca kiểm thử gồm đặt hàng, gửi lại yêu cầu, giá thay đổi, rollback khi ghi đơn thất bại, hai khách cùng mua sản phẩm cuối và quyền truy cập đơn hàng.
 
 Kiểm tra giao diện bằng cách đăng ký tài khoản, chọn CPU SP01 với mainboard SP05 để thấy lỗi socket, chọn mainboard SP07 với RAM SP08 để thấy lỗi chuẩn RAM, lưu liên kết chia sẻ, thêm linh kiện hợp lệ vào giỏ, thay số lượng, đặt hàng và mở lịch sử. Đăng nhập tài khoản khác để kiểm tra lịch sử được giới hạn theo tài khoản.
+
+## Bàn giao tuần 3
+
+Các trang quản trị yêu cầu tài khoản role admin:
+
+- `/admin`: KPI doanh thu đơn đã giao, đơn chờ xác nhận, sản phẩm, người dùng; biểu đồ Recharts theo tháng và theo danh mục; top 10 bán chạy và cảnh báo kho.
+- `/admin/products`: thêm/sửa/xóa sản phẩm, tìm kiếm, phân trang, chỉnh thông số linh hoạt và JSON specs.
+- `/admin/orders`: xem snapshot, lọc trạng thái, phân trang, cập nhật đơn và hoàn kho khi hủy.
+
+API chính: `/api/v1/admin/products`, `/api/v1/admin/orders`, `/api/v1/admin/orders/{code}/status` và `/api/v1/admin/analytics/{overview,monthly-revenue,category-revenue,top-selling-products,low-stock-alert}`. Các endpoint analytics cũ vẫn hoạt động.
+
+Để kích hoạt tài khoản seed `admin`, đặt `SEED_ADMIN_PASSWORD` trong backend/.env rồi chạy `database/seed.py`. Không đưa mật khẩu vào Git. Các tài khoản đăng ký từ giao diện luôn có role customer.
+
+Sau khi cập nhật source, chạy `npm install` trong frontend để cài Recharts. Khởi động lại backend trước khi dùng API mới.
+
+Tài liệu đi kèm:
+
+- [Báo cáo thiết kế](docs/BAO_CAO_DU_AN.md)
+- [Ma trận kiểm thử và demo](docs/KIEM_THU_VA_DEMO.md)
+- Công cụ benchmark: `backend/scripts/benchmark_indexes.py`. Chạy từ backend bằng `.\.venv\Scripts\python.exe scripts\benchmark_indexes.py`; kết quả thực tế xuất vào `docs/index-benchmark.json` và `docs/index-benchmark.html`. Công cụ chỉ dùng database thử nghiệm riêng.
+
+Không tự merge dev vào main trước khi review và nghiệm thu Atlas.
+
+## Ảnh sản phẩm
+
+Form quản trị sản phẩm cho phép nhập URL ảnh trực tiếp (mỗi dòng một URL) hoặc chọn nhiều ảnh từ máy tính. Ảnh đầu tiên là ảnh đại diện; có xem trước và bỏ từng ảnh trước khi lưu sản phẩm. Giới hạn 20 ảnh/sản phẩm, 5 MB/ảnh; hỗ trợ JPG, PNG, WebP, GIF. API upload chỉ cho admin và kiểm tra chữ ký file thay vì tin tên file.
+
+Ảnh upload được lưu ở backend/uploads/products với tên ngẫu nhiên và phục vụ qua /backend-api/media/. Thư mục upload không commit vào Git; khi triển khai cần lưu trên ổ đĩa bền vững và sao lưu thư mục này cùng database. Ảnh cũ trong frontend/public/images vẫn được ưu tiên; ảnh chỉ nằm trong images/images của backend được Next.js chuyển tiếp khi frontend không có file tương ứng. URL ngoài phải là link trực tiếp tới ảnh; website nguồn có thể chặn hotlink, khi đó hãy tải file hợp lệ lên.
+
+Kiểm tra upload và đường dẫn bằng lệnh trong backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_images -v
+```
+
+## Nâng cấp nhập sản phẩm và Build PC
+
+- `/admin/products`: chọn thương hiệu hiện có hoặc thêm thương hiệu mới. Form thông số thay đổi theo CPU, mainboard, RAM, ổ đĩa, VGA, PSU, case, tản nhiệt và màn hình. Có phần JSON nâng cao để giữ các thuộc tính tùy chỉnh. Khi đổi danh mục, form hỏi xác nhận trước khi xóa thông số của loại cũ.
+- `/build-pc`: gọi `POST /api/v1/builder/recommendations` để ưu tiên linh kiện còn hàng và chưa có xung đột theo thông số đã chọn. Mặc định ẩn linh kiện xung đột, hết hàng hoặc thiếu dữ liệu để xác minh; bật “Hiển thị cả…” để xem tất cả. Linh kiện đang chọn luôn được giữ và có giải thích lý do.
+- `/products/{sku}`: trang chi tiết có bộ ảnh, phóng to, giá/tồn kho, số lượng, thêm giỏ/mua ngay, mô tả, thông số tiếng Việt và sản phẩm cùng loại. Tên/ảnh trên thẻ sản phẩm mở trang riêng; nút hình mắt vẫn mở xem nhanh.
+
+Gợi ý chỉ kiểm tra các quy tắc đã triển khai và dữ liệu đã nhập, không xác nhận mọi yêu cầu lắp ráp vật lý hoặc BIOS. Khi mua vẫn kiểm tra cấu hình và tồn kho tại backend. PSU ưu tiên theo tổng TDP và ngưỡng nguồn khuyến nghị; nguồn thấp hơn ngưỡng khuyến nghị được đánh dấu có lưu ý.
+
+Kiểm tra nhanh: thêm VGA bằng form thay vì JSON; chọn CPU socket AM5 và kiểm tra danh sách mainboard; bật hiển thị tất cả để thấy lý do xung đột; mở sản phẩm từ danh sách, chuyển ảnh, phóng to và thử thêm giỏ.
+
+Chạy các kiểm thử không cần database tại backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_recommendations tests.test_week2.CompatibilityTests tests.test_week3.ValidationTests tests.test_images -v
+```
+
+## Tài khoản, hủy đơn và so sánh sản phẩm
+
+- `/account`: sửa tên/số điện thoại, thêm/sửa/xóa tối đa 10 địa chỉ, chọn địa chỉ mặc định. Sổ địa chỉ nhúng trong users.addresses và default_address_id. Không có API cho khách tự đổi role, email, password_hash hoặc giỏ hàng qua form hồ sơ.
+- `/checkout`: tự chọn địa chỉ mặc định nếu khách chưa nhập dữ liệu, có danh sách địa chỉ đã lưu và cho sửa thông tin riêng của đơn. Địa chỉ đơn hàng vẫn là snapshot, không thay đổi khi sửa sổ địa chỉ.
+- `/account/orders`: xem đúng đơn của tài khoản hiện tại (kể cả tài khoản admin), tiến trình giao hàng và hủy đơn Chờ xác nhận. API hủy kiểm tra chủ đơn, hoàn kho và ghi trạng thái trong cùng transaction. Gửi lại yêu cầu hủy không hoàn kho lần hai. Admin vẫn quản lý toàn bộ đơn tại /admin/orders.
+- `/compare`: chọn 2–4 sản phẩm cùng loại bằng nút So sánh ở thẻ/trang chi tiết. Danh sách SKU lưu cục bộ để giữ khi chuyển trang; bảng lấy giá, tồn kho, thông số mới nhất từ API. Có chế độ chỉ hiện thông số khác nhau, bỏ từng sản phẩm và thêm giỏ hàng. Có thể chia sẻ URL bảng so sánh.
+
+API mới: GET/PATCH /api/v1/account; POST /api/v1/account/addresses; PUT/DELETE /api/v1/account/addresses/{id}; POST /api/v1/account/addresses/{id}/default; GET /api/v1/account/orders; POST /api/v1/orders/{code}/cancel; GET /api/v1/products/compare?skus=SP01&skus=SP02.
+
+Kiểm tra các luồng này:
+
+```powershell
+# Trong backend, kiểm thử logic không cần kết nối MongoDB:
+.\.venv\Scripts\python.exe -m unittest tests.test_customer_features.AccountTests tests.test_customer_features.CancellationTests tests.test_customer_features.ComparisonTests -v
+
+# Trong frontend:
+npm run test:comparison
+npm run build
+```
+
+Các test transaction thật trong CustomerMongoTests chỉ chạy khi TEST_MONGODB_URI được đặt. Chúng kiểm tra hai yêu cầu hủy đồng thời, hủy đua với chuyển giao hàng, và địa chỉ giới hạn theo chủ tài khoản. Dữ liệu test nằm trong database riêng và được xóa khi hoàn tất.
+
+Demo: sửa hồ sơ → lưu hai địa chỉ và chọn mặc định → đặt hàng bằng địa chỉ đã lưu → hủy đơn chờ, đối chiếu kho → chọn hai CPU để so sánh → bật chỉ hiện khác nhau → thử chọn RAM vào danh sách CPU để kiểm tra giới hạn.

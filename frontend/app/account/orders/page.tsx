@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { getOrders, type Order } from '@/lib/api';
-import AccountGate from '@/components/AccountGate';
+import { getMyOrders, cancelOrder, type Order } from '@/lib/api';
 
 function History({ placed }: { placed?: string }) {
+  const [cancelling,setCancelling]=useState(''),[cancelError,setCancelError]=useState(''),[notice,setNotice]=useState('');
+  const cancelLock=useRef(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
@@ -15,12 +16,21 @@ function History({ placed }: { placed?: string }) {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError('');
-    getOrders({ status, skip: page * 10, limit: 10 }, controller.signal)
+    getMyOrders({ status, skip: page * 10, limit: 10 }, controller.signal)
       .then(data => { if (!controller.signal.aborted) setOrders(data); })
       .catch(err => { if (!controller.signal.aborted) setError(err.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+  return () => controller.abort();
   }, [status, page, retry]);
+
+    async function cancel(code:string){
+    if(cancelLock.current||!window.confirm('Hủy đơn đang chờ xác nhận? Tồn kho sẽ được hoàn lại.'))return;
+    cancelLock.current=true;setCancelling(code);setCancelError('');setNotice('');
+    try{await cancelOrder(code);setNotice('Đã hủy đơn '+code+'.');setRetry(x=>x+1);}
+    catch(e){setCancelError((e as Error).message);setRetry(x=>x+1);}
+    finally{cancelLock.current=false;setCancelling('');}
+  }
+
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 px-4 py-8">
@@ -33,6 +43,8 @@ function History({ placed }: { placed?: string }) {
           </select>
         </label>
       </div>
+      {cancelError&&<p role="alert" className="text-rose-300">{cancelError}</p>}
+      {notice&&<p role="status" className="text-emerald-300">{notice}</p>}
       {placed && <p role="status" className="rounded-lg border border-emerald-800 p-4 text-emerald-300">Đặt hàng thành công. Mã đơn {placed}.</p>}
       {error ? <div role="alert" className="text-rose-300">{error} <button onClick={() => setRetry(retry + 1)} className="underline">Thử lại</button></div>
         : loading ? <p role="status">Đang tải đơn hàng…</p>
@@ -43,6 +55,7 @@ function History({ placed }: { placed?: string }) {
               <div><h2 className="break-all font-semibold">{order.order_code}</h2><p className="mt-1 text-sm text-slate-400">{new Date(order.dates.created_at).toLocaleString('vi-VN')}</p></div>
               <div className="text-sm"><p className={order.status === 'Đã hủy' ? 'text-rose-300' : 'text-sky-300'}>{order.status}</p><p className="text-slate-400">{order.payment_status}</p></div>
             </div>
+            {order.status==='Đã hủy'?<p className="text-sm text-rose-300">Đơn hàng đã hủy.</p>:<ol aria-label="Tiến trình giao hàng" className="grid grid-cols-3 gap-2 text-xs">{['Chờ xác nhận','Đang giao','Đã giao'].map((step,index)=>{const current=['Chờ xác nhận','Đang giao','Đã giao'].indexOf(order.status);return <li key={step} aria-current={index===current?'step':undefined} className={'rounded-lg border p-3 '+(index<=current?'border-sky-700 text-sky-300':'border-slate-800 text-slate-500')}>{index+1}. {step}</li>;})}</ol>}
             <ul className="divide-y divide-slate-800">
               {order.items.map(item => <li key={item.sku} className="flex flex-wrap justify-between gap-3 py-3 text-sm">
                 <span>{item.name} × {item.quantity}</span><span>{item.unit_price.toLocaleString('vi-VN')} ₫ / sản phẩm</span>
@@ -51,6 +64,7 @@ function History({ placed }: { placed?: string }) {
             <p className="text-sm text-slate-300">{order.shipping_address.full_name} · {order.shipping_address.phone}</p>
             <p className="text-sm text-slate-400">{[order.shipping_address.street, order.shipping_address.ward, order.shipping_address.district, order.shipping_address.province].join(', ')}</p>
             <div className="flex flex-wrap justify-between gap-3 border-t border-slate-800 pt-4"><p className="text-sm">{order.payment_method}</p><p className="font-bold text-sky-300">{order.total_amount.toLocaleString('vi-VN')} ₫</p></div>
+            {order.status==='Chờ xác nhận'&&<button disabled={!!cancelling} onClick={()=>cancel(order.order_code)} className="rounded-lg border border-rose-800 px-4 py-2 text-sm text-rose-300 disabled:opacity-40">{cancelling===order.order_code?'Đang hủy…':'Hủy đơn hàng'}</button>}
           </article>
         ))}
       {!loading && !error && <nav aria-label="Phân trang đơn hàng" className="flex items-center justify-center gap-4">
@@ -63,5 +77,5 @@ function History({ placed }: { placed?: string }) {
 }
 
 export default function OrdersPage({ searchParams }: { searchParams: { placed?: string } }) {
-  return <AccountGate><History placed={searchParams.placed} /></AccountGate>;
+  return <History placed={searchParams.placed} />;
 }

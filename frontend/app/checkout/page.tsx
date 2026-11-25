@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ApiError, createOrder, getLocations, type CheckoutRequest, type Province } from '@/lib/api';
+import { ApiError, createOrder, getLocations, getAccount, type SavedAddress, type CheckoutRequest, type Province } from '@/lib/api';
 import { useSession } from '@/components/SessionProvider';
 import { useCart } from '@/components/CartProvider';
 import AccountGate from '@/components/AccountGate';
@@ -14,6 +14,10 @@ function Checkout() {
   const router = useRouter();
   const { user } = useSession();
   const { cart, loading, busy, error: cartError, reload } = useCart();
+  const [addresses,setAddresses]=useState<SavedAddress[]>([]), [savedAddressId,setSavedAddressId]=useState(''), [addressError,setAddressError]=useState('');
+  const [fullName,setFullName]=useState(user?.full_name??''), [phone,setPhone]=useState(user?.phone??''), [street,setStreet]=useState('');
+  const shippingTouched=useRef(false);
+  const explicitAddressChoice=useRef(false);
   const [locations, setLocations] = useState<Province[]>([]);
   const [provinceId, setProvinceId] = useState('');
   const [districtId, setDistrictId] = useState('');
@@ -38,6 +42,28 @@ function Checkout() {
       .finally(() => { if (!request.signal.aborted) setLocationLoading(false); });
     return () => request.abort();
   }, [retry]);
+
+  useEffect(()=>{
+    const controller=new AbortController();
+    getAccount(controller.signal).then(account=>{if(controller.signal.aborted)return;setAddresses(account.addresses);setAddressError('');if(!shippingTouched.current){setFullName(account.full_name);setPhone(account.phone);setSavedAddressId(account.default_address_id??'');}})
+      .catch(()=>{if(!controller.signal.aborted)setAddressError('Chưa tải được sổ địa chỉ. Bạn vẫn có thể nhập thông tin giao hàng bên dưới.');});
+    return()=>controller.abort();
+  },[user?.id]);
+
+  useEffect(()=>{
+    const saved=addresses.find(item=>item.id===savedAddressId);
+    if(!saved||!locations.length||(shippingTouched.current&&!explicitAddressChoice.current))return;
+    explicitAddressChoice.current=false;
+    setFullName(saved.full_name);setPhone(saved.phone);setStreet(saved.street);
+    const p=locations.find(item=>item.province_name===saved.province);
+    const d=p?.districts.find(item=>item.district_name===saved.district);
+    const w=d?.wards.find(item=>item.ward_name===saved.ward);
+    setProvinceId(p?.province_id??'');setDistrictId(d?.district_id??'');setWardId(w?.ward_id??'');
+    if(!w)setAddressError('Địa chỉ đã lưu không còn khớp danh mục. Vui lòng chọn lại tỉnh, huyện, xã.');else setAddressError('');
+  },[savedAddressId,addresses,locations]);
+
+  function markShippingTouched(){shippingTouched.current=true;explicitAddressChoice.current=false;}
+  function chooseAddress(id:string){shippingTouched.current=true;explicitAddressChoice.current=!!id;setSavedAddressId(id);if(!id){setFullName(user?.full_name??'');setPhone(user?.phone??'');setStreet('');setProvinceId('');setDistrictId('');setWardId('');setAddressError('');}}
 
   // Keep the same request identifier after a network failure, including a page reload.
   useEffect(() => {
@@ -113,27 +139,30 @@ function Checkout() {
         <form onSubmit={submit} className="grid gap-6 md:grid-cols-2">
           <fieldset disabled={submitting} className="space-y-4">
             <legend className="mb-3 text-lg font-semibold">Thông tin giao hàng</legend>
-            <label className="block space-y-1 text-sm"><span>Họ tên người nhận</span><input name="full_name" autoComplete="name" defaultValue={user?.full_name} required maxLength={100} className={field} /></label>
-            <label className="block space-y-1 text-sm"><span>Số điện thoại</span><input name="phone" type="tel" autoComplete="tel" required minLength={9} maxLength={20} className={field} /></label>
+            {addresses.length>0&&<label className="block space-y-1 text-sm"><span>Chọn địa chỉ đã lưu</span><select value={savedAddressId} onChange={e=>chooseAddress(e.target.value)} className={field}><option value="">Nhập địa chỉ mới</option>{addresses.map(a=><option key={a.id} value={a.id}>{a.label} — {a.full_name} — {a.street}</option>)}</select></label>}
+            <p className="text-xs text-slate-400">Có thể chỉnh thông tin cho riêng đơn này. <Link href="/account" className="text-sky-300 underline">Quản lý sổ địa chỉ</Link></p>
+            {addressError&&<p role="status" className="text-sm text-amber-300">{addressError}</p>}
+            <label className="block space-y-1 text-sm"><span>Họ tên người nhận</span><input name="full_name" autoComplete="name" value={fullName} onChange={e=>{markShippingTouched();setFullName(e.target.value);}} required maxLength={100} className={field} /></label>
+            <label className="block space-y-1 text-sm"><span>Số điện thoại</span><input name="phone" type="tel" value={phone} onChange={e=>{markShippingTouched();setPhone(e.target.value);}} autoComplete="tel" required minLength={9} maxLength={20} className={field} /></label>
             <p className="text-sm text-slate-400">Email đơn hàng {user?.email}</p>
             {locationLoading && <p role="status">Đang tải địa chỉ…</p>}
             {locationError && <p role="alert" className="text-rose-300">{locationError} <button type="button" onClick={() => setRetry(retry + 1)} className="underline">Thử lại</button></p>}
             <label className="block space-y-1 text-sm"><span>Tỉnh / Thành phố</span>
-              <select required value={provinceId} onChange={e => { setProvinceId(e.target.value); setDistrictId(''); setWardId(''); }} className={field}>
+              <select required value={provinceId} onChange={e => { markShippingTouched(); setProvinceId(e.target.value); setDistrictId(''); setWardId(''); }} className={field}>
                 <option value="">Chọn tỉnh / thành phố</option>{locations.map(item => <option key={item.province_id} value={item.province_id}>{item.province_name}</option>)}
               </select>
             </label>
             <label className="block space-y-1 text-sm"><span>Quận / Huyện</span>
-              <select required disabled={!province} value={districtId} onChange={e => { setDistrictId(e.target.value); setWardId(''); }} className={field}>
+              <select required disabled={!province} value={districtId} onChange={e => { markShippingTouched(); setDistrictId(e.target.value); setWardId(''); }} className={field}>
                 <option value="">Chọn quận / huyện</option>{province?.districts.map(item => <option key={item.district_id} value={item.district_id}>{item.district_name}</option>)}
               </select>
             </label>
             <label className="block space-y-1 text-sm"><span>Phường / Xã</span>
-              <select required disabled={!district} value={wardId} onChange={e => setWardId(e.target.value)} className={field}>
+              <select required disabled={!district} value={wardId} onChange={e => {markShippingTouched();setWardId(e.target.value);}} className={field}>
                 <option value="">Chọn phường / xã</option>{district?.wards.map(item => <option key={item.ward_id} value={item.ward_id}>{item.ward_name}</option>)}
               </select>
             </label>
-            <label className="block space-y-1 text-sm"><span>Số nhà, tên đường</span><input name="street" autoComplete="street-address" required maxLength={250} className={field} /></label>
+            <label className="block space-y-1 text-sm"><span>Số nhà, tên đường</span><input name="street" value={street} onChange={e=>{markShippingTouched();setStreet(e.target.value);}} autoComplete="street-address" required maxLength={250} className={field} /></label>
           </fieldset>
           <div className="h-fit space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="text-lg font-semibold">Đơn hàng của bạn</h2>
